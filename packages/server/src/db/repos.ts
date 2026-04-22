@@ -1,0 +1,614 @@
+/**
+ * Repository 层 — 封装各表的 CRUD。
+ *
+ * 设计原则：
+ *   - 每个函数返回强类型对象（@slark/shared 的 Channel / Agent / ChatMessage 等）
+ *   - JSON 字段（metadata_json / env_vars_json）自动序列化 / 反序列化
+ *   - 时间戳字段由 repo 填（调用方无需传 created_at）
+ *   - 不做业务校验（业务校验在 service 层）
+ */
+
+import type { Database } from 'better-sqlite3';
+import { nanoid } from 'nanoid';
+import type {
+  Agent,
+  AgentActivity,
+  ActivityType,
+  Channel,
+  ChatMessage,
+  MessageMetadata,
+  Task,
+} from '@slark/shared';
+import type {
+  AgentStatus,
+  ReasoningEffort,
+  Runtime,
+  SenderType,
+  TaskStatus,
+} from '@slark/shared';
+import { ACTIVITY_RETENTION_PER_AGENT } from '@slark/shared';
+
+const now = (): number => Date.now();
+
+// =============================================================================
+// Channels
+// =============================================================================
+
+interface ChannelRow {
+  id: string;
+  name: string;
+  description: string | null;
+  type: 'channel' | 'dm';
+  created_at: number;
+}
+
+function rowToChannel(r: ChannelRow): Channel {
+  return { ...r };
+}
+
+export const channelRepo = {
+  list(db: Database): Channel[] {
+    return (db.prepare('SELECT * FROM channels ORDER BY created_at ASC').all() as ChannelRow[])
+      .map(rowToChannel);
+  },
+
+  getById(db: Database, id: string): Channel | null {
+    const row = db.prepare('SELECT * FROM channels WHERE id = ?').get(id) as ChannelRow | undefined;
+    return row ? rowToChannel(row) : null;
+  },
+
+  create(
+    db: Database,
+    input: { id?: string; name: string; description?: string | null; type: 'channel' | 'dm' },
+  ): Channel {
+    const id = input.id ?? nanoid();
+    const ts = now();
+    db.prepare(
+      'INSERT INTO channels (id, name, description, type, created_at) VALUES (?, ?, ?, ?, ?)',
+    ).run(id, input.name, input.description ?? null, input.type, ts);
+    return {
+      id,
+      name: input.name,
+      description: input.description ?? null,
+      type: input.type,
+      created_at: ts,
+    };
+  },
+
+  update(
+    db: Database,
+    id: string,
+    patch: { name?: string; description?: string | null },
+  ): Channel | null {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    if (patch.name !== undefined) {
+      fields.push('name = ?');
+      values.push(patch.name);
+    }
+    if (patch.description !== undefined) {
+      fields.push('description = ?');
+      values.push(patch.description);
+    }
+    if (!fields.length) return this.getById(db, id);
+    values.push(id);
+    db.prepare(`UPDATE channels SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    return this.getById(db, id);
+  },
+
+  remove(db: Database, id: string): void {
+    db.prepare('DELETE FROM channels WHERE id = ?').run(id);
+  },
+};
+
+// =============================================================================
+// Agents
+// =============================================================================
+
+interface AgentRow {
+  id: string;
+  name: string;
+  avatar: string | null;
+  description: string | null;
+  runtime: string;
+  model: string | null;
+  reasoning: string | null;
+  env_vars_json: string | null;
+  status: string;
+  created_at: number;
+}
+
+function rowToAgent(r: AgentRow): Agent {
+  return {
+    id: r.id,
+    name: r.name,
+    avatar: r.avatar,
+    description: r.description,
+    runtime: r.runtime as Runtime,
+    model: r.model,
+    reasoning: r.reasoning as ReasoningEffort | null,
+    env_vars: r.env_vars_json ? (JSON.parse(r.env_vars_json) as Record<string, string>) : {},
+    status: r.status as AgentStatus,
+    created_at: r.created_at,
+  };
+}
+
+export const agentRepo = {
+  list(db: Database): Agent[] {
+    return (db.prepare('SELECT * FROM agents ORDER BY created_at ASC').all() as AgentRow[])
+      .map(rowToAgent);
+  },
+
+  getById(db: Database, id: string): Agent | null {
+    const row = db.prepare('SELECT * FROM agents WHERE id = ?').get(id) as AgentRow | undefined;
+    return row ? rowToAgent(row) : null;
+  },
+
+  getByName(db: Database, name: string): Agent | null {
+    const row = db.prepare('SELECT * FROM agents WHERE name = ?').get(name) as AgentRow | undefined;
+    return row ? rowToAgent(row) : null;
+  },
+
+  create(
+    db: Database,
+    input: {
+      id?: string;
+      name: string;
+      avatar?: string | null;
+      description?: string | null;
+      runtime: Runtime;
+      model?: string | null;
+      reasoning?: ReasoningEffort | null;
+      env_vars?: Record<string, string>;
+    },
+  ): Agent {
+    const id = input.id ?? nanoid();
+    const ts = now();
+    db.prepare(
+      `INSERT INTO agents (id, name, avatar, description, runtime, model, reasoning, env_vars_json, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?)`,
+    ).run(
+      id,
+      input.name,
+      input.avatar ?? null,
+      input.description ?? null,
+      input.runtime,
+      input.model ?? null,
+      input.reasoning ?? null,
+      input.env_vars ? JSON.stringify(input.env_vars) : null,
+      ts,
+    );
+    return {
+      id,
+      name: input.name,
+      avatar: input.avatar ?? null,
+      description: input.description ?? null,
+      runtime: input.runtime,
+      model: input.model ?? null,
+      reasoning: input.reasoning ?? null,
+      env_vars: input.env_vars ?? {},
+      status: 'idle',
+      created_at: ts,
+    };
+  },
+
+  update(
+    db: Database,
+    id: string,
+    patch: Partial<Omit<Agent, 'id' | 'created_at'>>,
+  ): Agent | null {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    if (patch.name !== undefined) {
+      fields.push('name = ?');
+      values.push(patch.name);
+    }
+    if (patch.avatar !== undefined) {
+      fields.push('avatar = ?');
+      values.push(patch.avatar);
+    }
+    if (patch.description !== undefined) {
+      fields.push('description = ?');
+      values.push(patch.description);
+    }
+    if (patch.runtime !== undefined) {
+      fields.push('runtime = ?');
+      values.push(patch.runtime);
+    }
+    if (patch.model !== undefined) {
+      fields.push('model = ?');
+      values.push(patch.model);
+    }
+    if (patch.reasoning !== undefined) {
+      fields.push('reasoning = ?');
+      values.push(patch.reasoning);
+    }
+    if (patch.env_vars !== undefined) {
+      fields.push('env_vars_json = ?');
+      values.push(JSON.stringify(patch.env_vars));
+    }
+    if (patch.status !== undefined) {
+      fields.push('status = ?');
+      values.push(patch.status);
+    }
+    if (!fields.length) return this.getById(db, id);
+    values.push(id);
+    db.prepare(`UPDATE agents SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    return this.getById(db, id);
+  },
+
+  updateStatus(db: Database, id: string, status: AgentStatus): void {
+    db.prepare('UPDATE agents SET status = ? WHERE id = ?').run(status, id);
+  },
+
+  remove(db: Database, id: string): void {
+    db.prepare('DELETE FROM agents WHERE id = ?').run(id);
+  },
+
+  // channel_agents 关联表
+  listInChannel(db: Database, channelId: string): Agent[] {
+    return (
+      db
+        .prepare(
+          `SELECT a.* FROM agents a
+           JOIN channel_agents ca ON ca.agent_id = a.id
+           WHERE ca.channel_id = ?
+           ORDER BY a.created_at ASC`,
+        )
+        .all(channelId) as AgentRow[]
+    ).map(rowToAgent);
+  },
+
+  addToChannel(db: Database, channelId: string, agentId: string): void {
+    db.prepare(
+      'INSERT OR IGNORE INTO channel_agents (channel_id, agent_id) VALUES (?, ?)',
+    ).run(channelId, agentId);
+  },
+
+  removeFromChannel(db: Database, channelId: string, agentId: string): void {
+    db.prepare('DELETE FROM channel_agents WHERE channel_id = ? AND agent_id = ?').run(
+      channelId,
+      agentId,
+    );
+  },
+};
+
+// =============================================================================
+// Messages
+// =============================================================================
+
+interface MessageRow {
+  id: string;
+  channel_id: string;
+  sender_type: string;
+  sender_id: string | null;
+  content: string;
+  metadata_json: string | null;
+  parent_id: string | null;
+  reply_count: number;
+  created_at: number;
+}
+
+function rowToMessage(r: MessageRow): ChatMessage {
+  return {
+    id: r.id,
+    channel_id: r.channel_id,
+    sender_type: r.sender_type as SenderType,
+    sender_id: r.sender_id,
+    content: r.content,
+    metadata: r.metadata_json ? (JSON.parse(r.metadata_json) as MessageMetadata) : null,
+    parent_id: r.parent_id,
+    reply_count: r.reply_count,
+    created_at: r.created_at,
+  };
+}
+
+export const messageRepo = {
+  /** 查询频道主线消息（parent_id IS NULL），按时间倒序 */
+  listChannelMain(
+    db: Database,
+    channelId: string,
+    limit = 50,
+    before?: string,
+  ): ChatMessage[] {
+    const rows = before
+      ? (db
+          .prepare(
+            `SELECT * FROM messages
+             WHERE channel_id = ? AND parent_id IS NULL
+               AND created_at < (SELECT created_at FROM messages WHERE id = ?)
+             ORDER BY created_at DESC LIMIT ?`,
+          )
+          .all(channelId, before, limit) as MessageRow[])
+      : (db
+          .prepare(
+            `SELECT * FROM messages
+             WHERE channel_id = ? AND parent_id IS NULL
+             ORDER BY created_at DESC LIMIT ?`,
+          )
+          .all(channelId, limit) as MessageRow[]);
+    return rows.map(rowToMessage).reverse();
+  },
+
+  /** 查询 Thread 内所有消息（包括根消息），按时间正序 */
+  listThread(db: Database, rootMessageId: string): ChatMessage[] {
+    const root = db
+      .prepare('SELECT * FROM messages WHERE id = ?')
+      .get(rootMessageId) as MessageRow | undefined;
+    if (!root) return [];
+    const replies = db
+      .prepare('SELECT * FROM messages WHERE parent_id = ? ORDER BY created_at ASC')
+      .all(rootMessageId) as MessageRow[];
+    return [rowToMessage(root), ...replies.map(rowToMessage)];
+  },
+
+  getById(db: Database, id: string): ChatMessage | null {
+    const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as MessageRow | undefined;
+    return row ? rowToMessage(row) : null;
+  },
+
+  create(
+    db: Database,
+    input: {
+      id?: string;
+      channel_id: string;
+      sender_type: SenderType;
+      sender_id: string | null;
+      content: string;
+      metadata?: MessageMetadata | null;
+      parent_id?: string | null;
+    },
+  ): ChatMessage {
+    const id = input.id ?? nanoid();
+    const ts = now();
+
+    db.prepare(
+      `INSERT INTO messages (id, channel_id, sender_type, sender_id, content, metadata_json, parent_id, reply_count, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+    ).run(
+      id,
+      input.channel_id,
+      input.sender_type,
+      input.sender_id,
+      input.content,
+      input.metadata ? JSON.stringify(input.metadata) : null,
+      input.parent_id ?? null,
+      ts,
+    );
+
+    // 如果有 parent，更新父消息 reply_count
+    if (input.parent_id) {
+      db.prepare('UPDATE messages SET reply_count = reply_count + 1 WHERE id = ?').run(
+        input.parent_id,
+      );
+    }
+
+    return {
+      id,
+      channel_id: input.channel_id,
+      sender_type: input.sender_type,
+      sender_id: input.sender_id,
+      content: input.content,
+      metadata: input.metadata ?? null,
+      parent_id: input.parent_id ?? null,
+      reply_count: 0,
+      created_at: ts,
+    };
+  },
+
+  updateContent(
+    db: Database,
+    id: string,
+    content: string,
+    metadata?: MessageMetadata | null,
+  ): void {
+    db.prepare('UPDATE messages SET content = ?, metadata_json = ? WHERE id = ?').run(
+      content,
+      metadata !== undefined
+        ? metadata === null
+          ? null
+          : JSON.stringify(metadata)
+        : undefined,
+      id,
+    );
+  },
+};
+
+// =============================================================================
+// Tasks
+// =============================================================================
+
+interface TaskRow {
+  id: number;
+  channel_id: string;
+  title: string;
+  status: string;
+  assignee_agent_id: string | null;
+  created_by: string;
+  source_message_id: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+function rowToTask(r: TaskRow): Task {
+  return {
+    id: r.id,
+    channel_id: r.channel_id,
+    title: r.title,
+    status: r.status as TaskStatus,
+    assignee_agent_id: r.assignee_agent_id,
+    created_by: r.created_by,
+    source_message_id: r.source_message_id,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  };
+}
+
+export const taskRepo = {
+  list(
+    db: Database,
+    filter: { channel_id?: string; status?: TaskStatus } = {},
+  ): Task[] {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (filter.channel_id) {
+      where.push('channel_id = ?');
+      params.push(filter.channel_id);
+    }
+    if (filter.status) {
+      where.push('status = ?');
+      params.push(filter.status);
+    }
+    const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    return (
+      db.prepare(`SELECT * FROM tasks ${whereSql} ORDER BY id ASC`).all(...params) as TaskRow[]
+    ).map(rowToTask);
+  },
+
+  getById(db: Database, id: number): Task | null {
+    const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as TaskRow | undefined;
+    return row ? rowToTask(row) : null;
+  },
+
+  create(
+    db: Database,
+    input: {
+      channel_id: string;
+      title: string;
+      assignee_agent_id?: string | null;
+      created_by: string;
+      source_message_id?: string | null;
+    },
+  ): Task {
+    const ts = now();
+    const result = db
+      .prepare(
+        `INSERT INTO tasks (channel_id, title, status, assignee_agent_id, created_by, source_message_id, created_at, updated_at)
+         VALUES (?, ?, 'todo', ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.channel_id,
+        input.title,
+        input.assignee_agent_id ?? null,
+        input.created_by,
+        input.source_message_id ?? null,
+        ts,
+        ts,
+      );
+    const id = Number(result.lastInsertRowid);
+    return {
+      id,
+      channel_id: input.channel_id,
+      title: input.title,
+      status: 'todo',
+      assignee_agent_id: input.assignee_agent_id ?? null,
+      created_by: input.created_by,
+      source_message_id: input.source_message_id ?? null,
+      created_at: ts,
+      updated_at: ts,
+    };
+  },
+
+  update(
+    db: Database,
+    id: number,
+    patch: { title?: string; status?: TaskStatus; assignee_agent_id?: string | null },
+  ): Task | null {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    if (patch.title !== undefined) {
+      fields.push('title = ?');
+      values.push(patch.title);
+    }
+    if (patch.status !== undefined) {
+      fields.push('status = ?');
+      values.push(patch.status);
+    }
+    if (patch.assignee_agent_id !== undefined) {
+      fields.push('assignee_agent_id = ?');
+      values.push(patch.assignee_agent_id);
+    }
+    if (!fields.length) return this.getById(db, id);
+    fields.push('updated_at = ?');
+    values.push(now());
+    values.push(id);
+    db.prepare(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    return this.getById(db, id);
+  },
+
+  remove(db: Database, id: number): void {
+    db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
+  },
+};
+
+// =============================================================================
+// Agent Activity
+// =============================================================================
+
+interface ActivityRow {
+  id: number;
+  agent_id: string;
+  type: string;
+  detail: string | null;
+  created_at: number;
+}
+
+function rowToActivity(r: ActivityRow): AgentActivity {
+  return {
+    id: r.id,
+    agent_id: r.agent_id,
+    type: r.type as ActivityType,
+    detail: r.detail,
+    created_at: r.created_at,
+  };
+}
+
+export const activityRepo = {
+  list(db: Database, agentId: string, limit = 50, before?: number): AgentActivity[] {
+    const rows = before
+      ? (db
+          .prepare(
+            `SELECT * FROM agent_activity
+             WHERE agent_id = ? AND id < ?
+             ORDER BY id DESC LIMIT ?`,
+          )
+          .all(agentId, before, limit) as ActivityRow[])
+      : (db
+          .prepare(
+            `SELECT * FROM agent_activity
+             WHERE agent_id = ?
+             ORDER BY id DESC LIMIT ?`,
+          )
+          .all(agentId, limit) as ActivityRow[]);
+    return rows.map(rowToActivity);
+  },
+
+  append(
+    db: Database,
+    input: { agent_id: string; type: ActivityType; detail?: string | null },
+  ): AgentActivity {
+    const ts = now();
+    const result = db
+      .prepare(
+        'INSERT INTO agent_activity (agent_id, type, detail, created_at) VALUES (?, ?, ?, ?)',
+      )
+      .run(input.agent_id, input.type, input.detail ?? null, ts);
+    const id = Number(result.lastInsertRowid);
+
+    // 保留策略（D-3）：超过 500 条删除最旧
+    db.prepare(
+      `DELETE FROM agent_activity
+       WHERE agent_id = ? AND id NOT IN (
+         SELECT id FROM agent_activity WHERE agent_id = ? ORDER BY id DESC LIMIT ?
+       )`,
+    ).run(input.agent_id, input.agent_id, ACTIVITY_RETENTION_PER_AGENT);
+
+    return {
+      id,
+      agent_id: input.agent_id,
+      type: input.type,
+      detail: input.detail ?? null,
+      created_at: ts,
+    };
+  },
+};

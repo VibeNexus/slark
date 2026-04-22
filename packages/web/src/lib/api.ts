@@ -1,0 +1,147 @@
+/**
+ * REST API 客户端封装
+ */
+
+import type {
+  Agent,
+  AgentActivity,
+  ChatMessage,
+  Channel,
+  RuntimeDetection,
+  Task,
+  TaskStatus,
+  ReasoningEffort,
+  Runtime,
+} from '@slark/shared';
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`${res.status} ${res.statusText}: ${body}`);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+export interface Health {
+  ok: boolean;
+  version: string;
+  slark_home: string;
+  db: { channels: number; agents: number };
+  ws?: { sockets: number; channels: Record<string, number> };
+  queue?: { running: number; waiting: number };
+}
+
+// Health & runtimes
+export const getHealth = () => request<Health>('/api/health');
+export const getRuntimes = () => request<RuntimeDetection[]>('/api/runtimes');
+export const getRuntimeModels = (id: Runtime) =>
+  request<{ models: string[]; note?: string; error?: string }>(`/api/runtimes/${id}/models`);
+
+// Channels
+export const listChannels = () => request<Channel[]>('/api/channels');
+export const getChannel = (id: string) => request<Channel>(`/api/channels/${id}`);
+export const createChannel = (data: {
+  name: string;
+  description?: string;
+  type?: 'channel' | 'dm';
+}) =>
+  request<Channel>('/api/channels', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+export const getChannelMessages = (id: string, opts?: { parent_id?: string; limit?: number }) => {
+  const qs = new URLSearchParams();
+  if (opts?.parent_id) qs.set('parent_id', opts.parent_id);
+  if (opts?.limit) qs.set('limit', String(opts.limit));
+  const q = qs.toString();
+  return request<ChatMessage[]>(`/api/channels/${id}/messages${q ? '?' + q : ''}`);
+};
+export const getChannelAgents = (id: string) =>
+  request<Agent[]>(`/api/channels/${id}/agents`);
+export const stopAllAgents = (id: string) =>
+  request<{ stopped: number }>(`/api/channels/${id}/stop-all`, {
+    method: 'POST',
+  });
+
+// Agents
+export const listAgents = () => request<Agent[]>('/api/agents');
+export const getAgent = (id: string) => request<Agent>(`/api/agents/${id}`);
+export const createAgent = (data: {
+  name: string;
+  description?: string;
+  runtime: Runtime;
+  model?: string;
+  reasoning?: ReasoningEffort;
+  env_vars?: Record<string, string>;
+}) => request<Agent>('/api/agents', { method: 'POST', body: JSON.stringify(data) });
+export const updateAgent = (id: string, patch: Partial<Agent>) =>
+  request<Agent>(`/api/agents/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+export const deleteAgent = (id: string) =>
+  request<void>(`/api/agents/${id}`, { method: 'DELETE' });
+export const startAgent = (id: string) =>
+  request<{ ok: boolean }>(`/api/agents/${id}/start`, { method: 'POST' });
+export const stopAgent = (id: string) =>
+  request<{ ok: boolean }>(`/api/agents/${id}/stop`, { method: 'POST' });
+export const restartAgent = (id: string) =>
+  request<{ ok: boolean }>(`/api/agents/${id}/restart`, { method: 'POST' });
+export const getAgentActivity = (id: string) =>
+  request<AgentActivity[]>(`/api/agents/${id}/activity`);
+export const getAgentWorkspace = (id: string) =>
+  request<{ path: string; tree: Array<{ name: string; type: string }> }>(
+    `/api/agents/${id}/workspace`,
+  );
+export const joinChannel = (channelId: string, agentId: string) =>
+  request<{ ok: boolean }>(`/api/channels/${channelId}/agents`, {
+    method: 'POST',
+    body: JSON.stringify({ agent_id: agentId }),
+  });
+
+// Tasks
+export const listTasks = (opts?: { channel_id?: string; status?: TaskStatus }) => {
+  const qs = new URLSearchParams();
+  if (opts?.channel_id) qs.set('channel_id', opts.channel_id);
+  if (opts?.status) qs.set('status', opts.status);
+  const q = qs.toString();
+  return request<Task[]>(`/api/tasks${q ? '?' + q : ''}`);
+};
+export const createTask = (data: {
+  channel_id: string;
+  title: string;
+  assignee_agent_id?: string | null;
+}) => request<Task>('/api/tasks', { method: 'POST', body: JSON.stringify(data) });
+export const updateTask = (id: number, patch: Partial<Task>) =>
+  request<Task>(`/api/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+export const deleteTask = (id: number) =>
+  request<void>(`/api/tasks/${id}`, { method: 'DELETE' });
+
+// 全局/辅助
+export const searchMessages = (q: string, channelId?: string) => {
+  const qs = new URLSearchParams({ q });
+  if (channelId) qs.set('channel_id', channelId);
+  return request<ChatMessage[]>(`/api/messages/search?${qs.toString()}`);
+};
+
+export const listGlobalThreads = () =>
+  request<ChatMessage[]>('/api/threads');
+
+export const saveMessage = (id: string) =>
+  request<{ ok: boolean }>(`/api/messages/${id}/save`, { method: 'POST' });
+
+export const unsaveMessage = (id: string) =>
+  request<void>(`/api/messages/${id}/save`, { method: 'DELETE' });
+
+export const isMessageSaved = (id: string) =>
+  request<{ saved: boolean }>(`/api/messages/${id}/saved`);
+
+export const listSaved = () => request<ChatMessage[]>('/api/saved');

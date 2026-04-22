@@ -1,0 +1,165 @@
+import type { FastifyInstance } from 'fastify';
+import type { Database } from 'better-sqlite3';
+import type { MessageMetadata, TaskStatus } from '@slark/shared';
+import { LOCAL_USER_ID } from '@slark/shared';
+import { agentRepo, messageRepo, taskRepo } from '../db/repos.js';
+import { hub } from '../ws/hub.js';
+
+const STATUS_EMOJI: Record<TaskStatus, string> = {
+  todo: '📝',
+  in_progress: '📌',
+  in_review: '🔎',
+  done: '✅',
+};
+
+const STATUS_LABEL: Record<TaskStatus, string> = {
+  todo: 'Todo',
+  in_progress: 'In Progress',
+  in_review: 'In Review',
+  done: 'Done',
+};
+
+function getActorName(db: Database, actorId: string): string {
+  if (actorId === LOCAL_USER_ID) return 'User';
+  const agent = agentRepo.getById(db, actorId);
+  return agent?.name ?? 'Unknown';
+}
+
+export async function taskRoutes(app: FastifyInstance, db: Database): Promise<void> {
+  // 列出任务（可按 channel / status 过滤）
+  app.get('/api/tasks', async (req) => {
+    const query = req.query as { channel_id?: string; status?: TaskStatus };
+    return taskRepo.list(db, query);
+  });
+
+  // 创建任务
+  app.post('/api/tasks', async (req, reply) => {
+    const body = req.body as {
+      channel_id: string;
+      title: string;
+      assignee_agent_id?: string | null;
+      source_message_id?: string | null;
+      created_by?: string;
+    };
+    if (!body?.channel_id || !body?.title) {
+      reply.code(400);
+      return { error: 'channel_id and title are required' };
+    }
+    const createdBy = body.created_by ?? LOCAL_USER_ID;
+    const task = taskRepo.create(db, {
+      channel_id: body.channel_id,
+      title: body.title,
+      assignee_agent_id: body.assignee_agent_id,
+      source_message_id: body.source_message_id,
+      created_by: createdBy,
+    });
+
+    // 广播 system message
+    const metadata: MessageMetadata = {
+      system_event: { type: 'task_created', task_id: task.id, title: task.title },
+      task_ref: {
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        assignee_agent_id: task.assignee_agent_id,
+      },
+    };
+    const sysMsg = messageRepo.create(db, {
+      channel_id: body.channel_id,
+      sender_type: 'system',
+      sender_id: LOCAL_USER_ID,
+      content: `📝 1 new task created: #${task.id} "${task.title}"`,
+      metadata,
+    });
+    hub.broadcast(body.channel_id, { type: 'message', message: sysMsg });
+    hub.broadcast(body.channel_id, { type: 'task_update', task });
+
+    reply.code(201);
+    return task;
+  });
+
+  // 详情
+  app.get('/api/tasks/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const t = taskRepo.getById(db, Number(id));
+    if (!t) {
+      reply.code(404);
+      return { error: 'task not found' };
+    }
+    return t;
+  });
+
+  // 更新（含状态变更）
+  app.patch('/api/tasks/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as {
+      title?: string;
+      status?: TaskStatus;
+      assignee_agent_id?: string | null;
+      by?: string;
+    };
+    const before = taskRepo.getById(db, Number(id));
+    if (!before) {
+      reply.code(404);
+      return { error: 'task not found' };
+    }
+
+    const task = taskRepo.update(db, Number(id), body ?? {});
+    if (!task) {
+      reply.code(404);
+      return { error: 'task not found' };
+    }
+
+    // 如果状态变了，发 system message
+    if (body?.status && body.status !== before.status) {
+      const actor = body.by ?? LOCAL_USER_ID;
+      const actorName = getActorName(db, actor);
+      const emoji = STATUS_EMOJI[body.status];
+      const content =
+        body.status === 'in_progress'
+          ? `${emoji} ${actorName} claimed #${task.id} "${task.title}"`
+          : `${emoji} ${actorName} moved #${task.id} "${task.title}" to ${STATUS_LABEL[body.status]}`;
+
+      const metadata: MessageMetadata = {
+        system_event:
+          body.status === 'in_progress'
+            ? { type: 'task_claimed', task_id: task.id, agent: actorName }
+            : {
+                type: 'task_moved',
+                task_id: task.id,
+                from: before.status,
+                to: body.status,
+                by: actorName,
+              },
+        task_ref: {
+          id: task.id,
+          title: task.title,
+          status: task.status,
+          assignee_agent_id: task.assignee_agent_id,
+        },
+      };
+      const sysMsg = messageRepo.create(db, {
+        channel_id: task.channel_id,
+        sender_type: 'system',
+        sender_id: LOCAL_USER_ID,
+        content,
+        metadata,
+      });
+      hub.broadcast(task.channel_id, { type: 'message', message: sysMsg });
+    }
+
+    hub.broadcast(task.channel_id, { type: 'task_update', task });
+    return task;
+  });
+
+  // 删除
+  app.delete('/api/tasks/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const t = taskRepo.getById(db, Number(id));
+    taskRepo.remove(db, Number(id));
+    if (t) {
+      hub.broadcast(t.channel_id, { type: 'task_update', task: { ...t, status: 'done' } });
+    }
+    reply.code(204);
+  });
+}

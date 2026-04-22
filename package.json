@@ -1,0 +1,38 @@
+{
+  "name": "slark",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Slark — Local AI Agent collaboration platform (slock.ai local clone)",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "concurrently -n server,web -c yellow,cyan \"pnpm dev:server\" \"pnpm dev:web\"",
+    "dev:server": "pnpm --filter @slark/server dev",
+    "dev:web": "pnpm --filter @slark/web dev",
+    "build": "pnpm -r build",
+    "build:server": "pnpm --filter @slark/server build",
+    "build:web": "pnpm --filter @slark/web build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint 'packages/*/src/**/*.{ts,tsx}'",
+    "format": "prettier --write \"packages/*/src/**/*.{ts,tsx,css,json,md}\"",
+    "format:check": "prettier --check \"packages/*/src/**/*.{ts,tsx,css,json,md}\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "concurrently": "^9.1.2",
+    "eslint": "^9.17.0",
+    "@typescript-eslint/parser": "^8.18.2",
+    "@typescript-eslint/eslint-plugin": "^8.18.2",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "tsx": "^4.19.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["better-sqlite3", "esbuild"]
+  }
+}
