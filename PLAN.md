@@ -1,10 +1,12 @@
-# Slark - 本地 AI Agent 协作平台
+# Slark - Programmable AI Team OS（战术执行计划）
 
-> slock.ai 的本地复刻版。Agent 能力由本地 CLI 工具驱动，无需登录，无需 MCP，所有数据本地存储。
+> **Slark 的定位是 Programmable AI Team OS（可编程的 AI 团队操作系统）**。详见 [`docs/product-brief.md`](docs/product-brief.md) v1.0。
 >
-> **MVP 仅支持 Cursor CLI**（基于 Phase 0 验证：Cursor 首 token 约 4.5s、支持字符级流式，体验远优于 Codex/Claude）。Codex / Claude / Kimi / Copilot / Gemini 在 Runtime 下拉中占位并标 "(coming soon)"，MVP 后迭代再接入。
+> 核心机制：**Goal → AI 配 Team → Team 协同设计 Workflow → 自动沉淀 / 自动成长**。全链路 AI 自驱动，人只在关键节点 Approve。
 >
-> **⚠ 动工前先读**：[`docs/product-brief.md`](docs/product-brief.md) 是本项目的战略层文档（Slark 是什么 / 为谁做 / 不做什么）。本文件是战术层（怎么分阶段做），如与 product-brief 冲突以 product-brief 为准。
+> **MVP runtime 仅支持 Cursor CLI**（基于 Phase 0 验证：Cursor 首 token 约 4.5s、支持字符级流式）。Codex / Claude / Kimi / Copilot / Gemini 在 Runtime 下拉占位，MVP 后迭代再接入。
+>
+> **⚠ 动工前先读**：[`docs/product-brief.md`](docs/product-brief.md) v1.0 是战略层北极星。本文件是战术执行层，与 product-brief 冲突时以 product-brief 为准。
 
 ## 文档地图
 
@@ -12,10 +14,11 @@
 
 | 文档 | 层级 | 用途 | 什么时候读 |
 |------|------|------|-----------|
-| [`docs/product-brief.md`](docs/product-brief.md) | **战略** | 产品定位 / 目标用户 / 核心决策 / 非目标 | **必读，第一份** |
-| `PLAN.md`（本文件） | 战术 | 4 阶段实施路线 + 每阶段验收清单 | 理解完产品定位后，规划执行时 |
-| [`docs/technical-decisions.md`](docs/technical-decisions.md) | 实现 | 12+ 条默认决策（状态机/Token/并发/metadata/workspace/error UI 等） | 编码时遇到不确定的常量、策略、边缘情况 |
-| [`docs/phase0-cli-spike.md`](docs/phase0-cli-spike.md) | 实现 | Phase 0 CLI 验证详细步骤 + 验收 | 执行 Phase 0 时 |
+| [`docs/product-brief.md`](docs/product-brief.md) | **战略** | 产品定位 / 6 层架构 / 8 决策 / Sprint 路线图 / 非目标 | **必读，第一份** |
+| `PLAN.md`（本文件） | 战术 | 按 Sprint 拆分的交付清单 + 验收标准 | 理解完产品定位后，规划执行时 |
+| [`docs/clawteam-comparison.md`](docs/clawteam-comparison.md) | 战术 | ClawTeam 竞品分析 + 可借鉴条目（B-1~B-8） | 规划进阶功能时参考 |
+| [`docs/technical-decisions.md`](docs/technical-decisions.md) | 实现 | 默认决策 / 常量 / 状态机 / error UI 等 | 编码时遇到不确定的常量、策略 |
+| [`docs/phase0-cli-spike.md`](docs/phase0-cli-spike.md) | 实现 | Phase 0 CLI 验证（已完成） | 回溯 CLI 行为 |
 | [`docs/cli-event-format.md`](docs/cli-event-format.md) | 实现 | Cursor/Codex/Claude 事件格式对照 | 写 CLI Adapter 时 |
 | [`docs/ui-reference/README.md`](docs/ui-reference/README.md) | 视觉 | UI 基准总索引（17 张截图 + 4 份规范） | 做 UI 时 |
 | [`docs/ui-reference/design-tokens.md`](docs/ui-reference/design-tokens.md) | 视觉 | 色值/字体/间距/边框 | 配 Tailwind theme 时 |
@@ -25,31 +28,48 @@
 
 ## 项目总览
 
+### 一句话定位
+
+> **Slark = Programmable AI Team OS** —— 你设定 Goal，AI 自动配备团队，团队自己设计 Workflow，系统持续沉淀经验并让每个 Agent 随项目成长。
+
+### 6 层架构（核心模型）
+
+```
+Layer 6:  Capability      能力强化（Evaluator + Coach）
+Layer 5:  Knowledge       集体知识（Scribe + decisions/lessons）
+Layer 4:  Responsibility  职责框架（RACI 简化：Step × Agent）
+Layer 3:  Workflow        工作流"甬道"（声明式 YAML）
+Layer 2:  Team            团队成员（Team Architect AI 自动配）
+Layer 1:  Goal            项目目标（一等公民，必填）
+```
+
 ### 三条主流程
 
 ```
-流程 A：基础消息流
-  用户输入 → WebSocket → SQLite → 广播 → @mention 解析
-  → Agent Engine 构建上下文 → CLI Bridge spawn → 流式 stdout
-  → WebSocket 推送 → 前端实时渲染 → 完整回复存入 SQLite
+流程 A：Goal → AI 团队组建（Sprint 1）
+  用户填 Goal + Workspace → Team Architect spawn → 推荐 Team
+  → 用户 Approve → 创建 Agents 加入 #general → 用户首次 @ 开始对话
 
-流程 B：@mention 链式触发
-  Agent 回复中包含 @其他Agent → Message Router 检测
-  → 自动创建/复用 Thread → 在 Thread 内触发下一个 Agent（重复流程 A）
-  → 链式深度限制 max=10，同 Agent 连续 >3 次暂停
+流程 B：Workflow 驱动多 Agent 协作（Sprint 2~3）
+  用户 /trigger → Workflow Runner 按 YAML step 路由
+  → 每步 spawn 对应 owner Agent → 流式输出 → 完成 → 下一步
+  → await_approval step 等用户 /approve → 整条 thread 完结
 
-流程 C：Task 生命周期
-  用户在 Tasks 面板创建 Task → Todo → Agent claimed (In Progress)
-  → In Review → Done → 每次状态变更产生系统消息，显示在频道主线
+流程 C：自动沉淀 + 持续进化（Sprint 4~5）
+  Workflow Run 结束 → Scribe 回扫 thread 提炼 lessons / decisions
+  → 用户在 Intelligence Tab Approve → 进入项目知识池
+  → 后续 Agent spawn 时 ContextBuilder 按 audience 注入相关知识
+  Coach 周期性扫描 Agent 表现 → 提 description 修改建议
+  → 用户 Apply → agents.description 演化
 ```
 
 ### 五个核心模块
 
-- **M1: CLI Bridge** — 替代 MCP，通过 spawn + NDJSON 事件流与 CLI 工具通信
-- **M2: Agent Engine** — Agent CRUD + 状态机 + 上下文构建（description + 团队成员列表 + 对话历史）
-- **M3: Message Bus** — WebSocket + 消息路由 + @mention 链式触发 + Thread 管理
-- **M4: Data Layer** — SQLite 6 张表
-- **M5: Frontend UI** — 1:1 还原 slock.ai 暖黄/奶油色 Neo-Brutalism 风格
+- **M1: CLI Bridge** — `child_process.spawn` + NDJSON/JSONL 流式解析（Cursor 适配器）
+- **M2: Agent Engine** — Agent CRUD / 状态机 / ContextBuilder / agent_runs per-channel 状态
+- **M3: Message Bus** — WebSocket / Message Router / @mention 链式触发 / Thread / Workflow Runner
+- **M4: Data Layer** — SQLite (projects / channels / agents / messages / tasks / workflows / decisions / lessons / agent_feedback / ...)
+- **M5: Frontend UI** — Vite + React + Tailwind，Neo-Brutalism 暖黄风（1:1 对照 slock.ai）
 
 ### 技术栈
 
@@ -62,73 +82,43 @@
 
 详见 [`docs/technical-decisions.md`](docs/technical-decisions.md)。核心摘要：
 
-- **Agent 状态机（D-1）**: `idle / thinking / working / error / stopped`（5 状态，适配 spawn-per-message 模型，不用原版 Online/Hibernating）
+- **Agent 状态机（D-1）**: `idle / thinking / working / error / stopped`，per-channel 派生（Sprint 1 起从 `agent_runs` 表派生，原 `agents.status` 字段废除）
 - **Token 预算（D-4）**: `MAX_CONTEXT=8000 / DESCRIPTION=2000 / HISTORY=5500 / CURRENT=500`，按"4 字符 ≈ 1 token"粗估
 - **并发控制（D-5）**: 同时最多 3 个 CLI 进程，超出进 FIFO 队列（队列最大 20），单次 spawn 超时 5 分钟
-- **链式触发防护（D-6）**: `max_chain_depth=10 / max_consecutive_triggers=3 / max_mentions_per_message=5`
-- **数据目录（D-8）**: `~/.slark/slark.db` + `~/.slark/agents/{id}/`（Slark 不预置记忆文件，CLI 工具自管）
-- **Seed 数据（D-9）**: 首次启动预置 `#general` 频道 + （如检测到 Cursor）一个 Assistant Agent
+- **链式触发防护（D-6）**: `max_chain_depth=10 / max_consecutive_triggers=3 / max_mentions_per_message=5`，per-thread 计数
+- **数据目录（D-8 v1.0 修订）**: `~/.slark/slark.db`；**不再有 Agent 沙盒目录**；Agent cwd 取自 `project.workspace_path`
+- **Seed 数据（D-9 v1.0 修订）**: 首次启动**不预置任何 Project / Channel / Agent**，欢迎页引导 Create Project
 
 ---
 
-## 四阶段实施路线
+## 实施路线总览
 
 ```
-Phase 0    CLI Bridge 技术验证 (Spike)   ← 验证最大技术风险
-Phase 0.5  UI 基准采集 (Reference)       ← ✅ 已完成，视觉基线
-Phase 1    基础设施 (MVP-1 ~ MVP-3)      ← 项目骨架 + 数据 + API
-Phase 2    核心引擎联调 (MVP-4 ~ MVP-6)  ← 第一次端到端演示
-Phase 3    协作与配置 (MVP-7 ~ MVP-9)    ← 完整 MVP 交付
+Phase 0     CLI Bridge 技术验证 (Spike)        ✅ 已完成
+Phase 0.5   UI 基准采集 (Reference)            ✅ 已完成
+v0 MVP      MVP-1 ~ MVP-9 基础聊天室能力      ✅ 已交付（作为 Sprint 1 起点）
+Sprint 1    Foundation + Goal → AI Team       ⏳ 即将动工（Programmable AI Team OS 雏形）
+Sprint 2    Workflow Framework                Workflow YAML + 3 内置模板 + 执行引擎
+Sprint 3    Responsibility + User Intervention 批准流 + 用户介入 + Workflow Import/Export
+Sprint 4    Delivery Loop + Team-First-Collab Scribe 沉淀 + Intelligence Tab + Facilitator
+Sprint 5    Evolution Loop                    Evaluator + Coach + Description 演化
+Sprint 6    Onboarding Loop + Skill Matrix    新 Project 自动分析 + 能力地图
+Sprint 7+   远期路线                          跨 Project 经验迁移 / 多 runtime / Marketplace
 ```
 
-### 阶段验收概览
-
-| 阶段 | 验收标准简述 | 详细清单 |
-|------|-------------|---------|
-| Phase 0 | 三个 CLI 适配器原型均能解析流式事件 | `docs/phase0-cli-spike.md` §验收标准 |
-| Phase 0.5 ✅ | 17 张截图 + 5 份规范文档 | `docs/ui-reference/` |
-| Phase 1 | REST API + WS 符合协议，curl 全通 | 本文 Phase 1 验收清单 |
-| Phase 2 | 端到端 Agent 流式回复 + 核心 UI 与参考截图视觉对齐 | 本文 Phase 2 验收清单 |
-| Phase 3 | 4 个核心协作场景全通 | 本文 Phase 3 验收清单 |
-
-每个 Phase 的详细清单见下面各 Phase 章节尾部。
-
 ---
 
-## 原方案关键修正
-
-原设计假设 CLI 工具是**长驻进程**通过 stdin/stdout 持续对话。经实际验证，三个 CLI 工具都是 **spawn-per-message 模型**：
-
-| 原设计 | 修正后 |
-|--------|--------|
-| `codex --quiet` 非交互模式 | `codex exec --json` 单次执行 + JSONL 事件流 |
-| `claude -p` 管道模式保持进程 | `claude -p --output-format stream-json` 单次执行 + NDJSON |
-| 无 Cursor CLI 支持 | `cursor agent -p --output-format stream-json` 新增为第三适配器 |
-| 长驻进程 + stdin 发消息 | 每条消息 spawn 新进程，上下文通过 prompt 注入 |
-| Agent 休眠 = 挂起进程 | Agent 休眠 = 无进程（天然实现） |
-| 进程生命周期管理复杂 | 进程生命周期简单（启动 → 流式输出 → 退出） |
-
-**架构影响**:
-- 上下文注入成为最关键的模块（每次调用都要注入完整历史）
-- Token 预算管理必须进 MVP（不能无限注入历史）
-- 进程并发控制更简单（每个进程生命周期短暂）
-- Markdown 渲染必须进 Phase 2（Agent 回复天然是 Markdown）
-
----
-
-## Phase 0: CLI Bridge 技术验证 (Spike)
+## Phase 0: CLI Bridge 技术验证 (Spike) ✅
 
 > 详细计划见 [docs/phase0-cli-spike.md](docs/phase0-cli-spike.md)
 
-**目标**: 在写任何业务代码之前，验证三个 CLI 工具的非交互模式行为，确定适配器接口设计。
+**目标**: 在写业务代码之前，验证 Codex / Claude Code / Cursor CLI 的非交互模式行为，确定适配器接口设计。
 
-**验证范围**: Codex CLI / Claude Code / Cursor CLI 的 NDJSON 事件格式、上下文注入方式、启动延迟、输出解析。
-
-**交付物**:
-- `spike/` 目录下的三个适配器原型 + 测试脚本
-- 统一的 `CLIAdapter` 接口定义（TypeScript）
-- 三个 CLI 的事件格式对照文档
-- Token 预算基线数据
+**关键产出**：
+- 三个 CLI 都是 **spawn-per-message** 模型（推翻原"长驻进程"假设）
+- 统一的 `CLIAdapter` 接口已落地（`packages/server/src/agents/types.ts`）
+- 三个 CLI 的事件格式对照见 [`docs/cli-event-format.md`](docs/cli-event-format.md)
+- Cursor 首 token 约 4.5s，支持字符级流式 → 选定为 MVP runtime
 
 ---
 
@@ -136,515 +126,571 @@ Phase 3    协作与配置 (MVP-7 ~ MVP-9)    ← 完整 MVP 交付
 
 > 产出见 [docs/ui-reference/](docs/ui-reference/README.md)
 
-**目标**: 通过浏览器自动化从 app.slock.ai 采集真实截图与组件规范，作为 MVP-5 前端实现的视觉基线，保证 1:1 还原度。
+**目标**: 通过浏览器自动化从 app.slock.ai 采集真实截图与组件规范，作为前端实现的视觉基线，保证 1:1 还原度。
 
-**交付物**（已完成）:
-- `docs/ui-reference/screenshots/` 17 张桌面版截图（覆盖 Sidebar / Channel / DM / Thread / Agent Profile 3 Tab / Create Agent Dialog / Tasks / Stop All / 全局 Threads/Tasks/Saved / Machine 页）
-- `docs/ui-reference/design-tokens.md` 色值、字体、间距、边框、阴影
-- `docs/ui-reference/components.md` 每个组件的结构与状态
-- `docs/ui-reference/routes.md` URL 结构 + query 参数互斥规则
-- `docs/ui-reference/local-adaptations.md` 相对原版的裁剪清单
+**关键产出**：
+- 17 张桌面版截图 + 5 份规范文档
+- 修正原设计：侧边栏明亮黄、Agent Profile 3 Tab、三栏布局、Active 整行粉色填充等
 
-**关键发现**（对原设计的修正）:
-- 侧边栏背景是**明亮黄色**，不是米色；米色是主内容区
-- Agent Profile 只有 **3 个 Tab**（PROFILE / WORKSPACE / ACTIVITY），没有独立 Settings Tab；Runtime/Model/Reasoning/Env Vars/Actions 全在 Profile 下
-- Thread 和 Agent Profile 都作为**右侧第 3 栏面板**打开，形成三栏布局
-- 全局 Tasks 是 **Kanban 看板视图**（MVP 可先砍，只做频道内 Tasks 面板）
-- Runtime 下拉支持 6 种 CLI：Claude Code / Codex CLI / Kimi CLI / Copilot CLI / Cursor CLI / Gemini CLI
-- Active 导航项整行**粉色填充**（不是左侧竖线）
-- 已读/未读用小粉色圆形 badge 显示数字
+**v1.0 后的视觉差异**（需要在 Sprint 1+ 时补充到 ui-reference）：
+- Sidebar 顶部 "KaisTeam ▼" 改为 **Project 切换器**（Slark v1.0 概念，原版无对应）
+- Agent Profile 从 3 Tab 简化为 PROFILE / ACTIVITY（Sprint 1）→ 后续加 FEEDBACK Tab（Sprint 5）
+- 新增 **Intelligence Tab**（Sprint 4，与 CHAT/TASKS Tab 平级）
+- 新增 **Workflow 进度条 + Approval Card** 组件（Sprint 2~3）
 
 ---
 
-## Phase 1: 基础设施 (MVP-1 ~ MVP-3)
+## v0 MVP（✅ 已交付，作为 Sprint 1 起点）
 
-**目标**: 搭建项目骨架、数据层和后端 API，所有模块可独立测试。
+v0 MVP 是按原 PLAN（v0.1 ~ v0.3）落地的"AI 编程协作室"基础版本。当前代码库（`packages/server` + `packages/web`）已包含以下能力：
 
-### MVP-1: Monorepo 骨架
+### 已交付清单
 
-- pnpm workspaces: `packages/web` + `packages/server` + `packages/shared`
-- TypeScript strict mode + 路径别名（`@slark/shared`、`@slark/web`、`@slark/server`）
-- Vite + React 19 + Tailwind CSS v4（web）—— 不引入 shadcn，见 O-1
-- Fastify + ws + better-sqlite3（server）
-- 共享类型与常量（shared：`types.ts` / `constants.ts` / `events.ts`）
-- 根 `package.json` scripts：
-  - `pnpm dev` — 并发启动 web + server（`concurrently`）
-  - `pnpm dev:web` / `pnpm dev:server` — 单独启动
-  - `pnpm build` — 构建两端
-  - `pnpm typecheck` — 全量类型检查
-  - `pnpm lint` — ESLint + Prettier
+| 模块 | 已实现 | 文件位置（指引）|
+|-----|-------|---------------|
+| **Monorepo 骨架** | pnpm workspaces / TS strict / Vite / Fastify / better-sqlite3 / concurrently | `package.json` / `packages/*/package.json` |
+| **SQLite Schema (v0)** | channels / agents / channel_agents / messages / tasks / agent_activity / saved_messages / meta（**8 张表，v1.0 需重构**） | `packages/server/src/db/schema.sql` |
+| **REST API** | channels / agents / messages / tasks / runtimes / health 等 | `packages/server/src/routes/` |
+| **WebSocket 协议** | subscribe_channel / send_message / message_stream / agent_status / message_done 等 | `packages/server/src/ws/handler.ts` |
+| **CLI Bridge** | CursorAdapter（含 thinking/text/tool stream 解析）+ CLIRunner（并发池 / 超时 / kill）| `packages/server/src/agents/` |
+| **ContextBuilder** | description + team members + history + current message + 截断 | `packages/server/src/agents/context-builder.ts` |
+| **Message Router** | @mention 解析 + 链式触发（已支持 Thread）| `packages/server/src/messaging/router.ts` |
+| **前端 Shell** | Sidebar / Channel / DM / Thread / Tasks / Agent Profile 3 Tab / Create Agent / Channel Settings 对话框 | `packages/web/src/components/` |
+| **视觉对齐** | Tailwind v4 配 Neo-Brutalism token，整体与 slock.ai 参考截图一致 | `packages/web/src/index.css` 等 |
+| **路由** | `/channel/:id` / `/dm/:id` / `?profile=` / `?thread=` / `?chatTab=` 等 | `packages/web/src/App.tsx` |
+| **Seed 数据 (v0)** | 首次启动创建 `#general` channel + 检测 cursor-agent 创建 Assistant | `packages/server/src/db/seed.ts` |
 
-### MVP-2: SQLite 数据层
+### v0 MVP 已知差距（Sprint 1 需要补的事）
 
-**Schema（7 张表，包含 `channel_agents` 关联表）**:
+按 [`docs/product-brief.md`](docs/product-brief.md) v1.0 的 §11 Schema 总清单 + §D-2~D-8 的对照：
+
+| # | v0 状态 | v1.0 要求 | Sprint 1 处理 |
+|---|--------|---------|------|
+| 1 | 无 `projects` 表 | Project 实体 + workspace_path NOT NULL + goal NOT NULL | 新建 |
+| 2 | `channels` 无 project_id | 必须归属 Project | ALTER + 必填 |
+| 3 | `agents` 无 project_id | 必须归属 Project（v1.0 砍全局 Agent）| ALTER + 必填 |
+| 4 | `agents.status` 是单值字段 | per-channel 派生自 `agent_runs` 表（K-1）| 删字段 + 建新表 |
+| 5 | `agent_activity` 无 channel_id | 加 channel_id 区分项目（K-3）| ALTER |
+| 6 | Agent cwd = `~/.slark/agents/{id}/`（沙盒） | cwd = `project.workspace_path`（K-4 + D-8）| 改 CLIRunner |
+| 7 | Seed 直接建 #general + Assistant | 不预置任何 Project / Agent，首启显示欢迎页 | 重写 seed |
+| 8 | Agent Profile 3 Tab（PROFILE/WORKSPACE/ACTIVITY）| 简化为 2 Tab（PROFILE/ACTIVITY），Workspace Tab 删除 | 改组件 |
+| 9 | 无 Project 切换器 | Sidebar 顶部 Project 切换器 | 新增组件 |
+| 10 | 无 Team Architect 系统 Agent | Goal → AI 推 Team 是 Sprint 1 核心 | 实现 |
+
+**数据迁移策略**（按 product-brief.md N-14）：v0 数据库直接清空重建，不保留兼容字段。
+
+---
+
+## Sprint 1: Foundation + Goal → AI Team（即将动工）
+
+**目标**: **3 分钟内从 Goal 得到一个可用的 AI Team**，让 Slark 的 "Programmable AI Team OS" 雏形落地。
+
+**战略价值**：第一次实现 "Goal → AI 配 Team"。用户见到产品的**第一分钟**就能感受到差异化（vs slock.ai 手动建 Agent / vs Cursor 单 Agent）。
+
+**预估工期**: 8~10 工作日
+
+### 1.1 Schema 重构（按 product-brief §11）
+
+清空 `~/.slark/slark.db`（按 N-14），按以下 schema 重建：
 
 ```sql
-CREATE TABLE channels (
+-- 1. projects 表（核心新增）
+CREATE TABLE projects (
   id              TEXT PRIMARY KEY,
-  name            TEXT NOT NULL,
-  description     TEXT,
-  type            TEXT NOT NULL CHECK(type IN ('channel','dm')),
+  name            TEXT NOT NULL UNIQUE,         -- URL slug, 如 'sso-service'
+  display_name    TEXT,
+  workspace_path  TEXT NOT NULL,                -- 必填，绝对路径
+  goal            TEXT NOT NULL,                -- 必填，最长 500 字符
+  team_rules      TEXT,                         -- 可选，团队协作规则
+  color           TEXT,
   created_at      INTEGER NOT NULL
 );
 
-CREATE TABLE agents (
-  id              TEXT PRIMARY KEY,
-  name            TEXT NOT NULL UNIQUE,
-  avatar          TEXT,                      -- pixel art key 或颜色 hex
-  description     TEXT,
-  runtime         TEXT NOT NULL,             -- 'codex' | 'claude' | 'cursor' | 'kimi' | 'copilot' | 'gemini'
-  model           TEXT,
-  reasoning       TEXT,                      -- 'low' | 'medium' | 'high' | 'xhigh'
-  env_vars_json   TEXT,                      -- JSON 对象
-  status          TEXT NOT NULL DEFAULT 'idle',  -- 见 D-1
-  created_at      INTEGER NOT NULL
-);
+-- 2. channels 加 project_id
+ALTER TABLE channels ADD COLUMN project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE;
+CREATE INDEX idx_channels_project ON channels(project_id);
 
-CREATE TABLE channel_agents (
-  channel_id      TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-  agent_id        TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-  PRIMARY KEY (channel_id, agent_id)
-);
+-- 3. agents 加 project_id（v1.0 砍全局 Agent，全部 project-scoped）
+ALTER TABLE agents ADD COLUMN project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE;
+CREATE INDEX idx_agents_project ON agents(project_id);
 
-CREATE TABLE messages (
-  id              TEXT PRIMARY KEY,
-  channel_id      TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-  sender_type     TEXT NOT NULL CHECK(sender_type IN ('user','agent','system')),
-  sender_id       TEXT,                      -- agent_id 或 'local-user' 或 NULL（system）
-  content         TEXT NOT NULL,
-  metadata_json   TEXT,                      -- 见 D-7 MessageMetadata 契约
-  parent_id       TEXT REFERENCES messages(id) ON DELETE CASCADE,  -- Thread 根消息 ID
-  reply_count     INTEGER NOT NULL DEFAULT 0,                      -- 仅根消息维护
-  created_at      INTEGER NOT NULL
-);
-CREATE INDEX idx_messages_channel ON messages(channel_id, created_at DESC);
-CREATE INDEX idx_messages_thread ON messages(parent_id) WHERE parent_id IS NOT NULL;
-
-CREATE TABLE tasks (
-  id                  INTEGER PRIMARY KEY AUTOINCREMENT,  -- 自增便于显示 "#27"
-  channel_id          TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-  title               TEXT NOT NULL,
-  status              TEXT NOT NULL DEFAULT 'todo'
-                      CHECK(status IN ('todo','in_progress','in_review','done')),
-  assignee_agent_id   TEXT REFERENCES agents(id) ON DELETE SET NULL,
-  created_by          TEXT NOT NULL,         -- 'local-user' 或 agent_id
-  source_message_id   TEXT REFERENCES messages(id) ON DELETE SET NULL,  -- "As Task" 或引用来源
-  created_at          INTEGER NOT NULL,
-  updated_at          INTEGER NOT NULL
-);
-CREATE INDEX idx_tasks_channel_status ON tasks(channel_id, status);
-
-CREATE TABLE agent_activity (
+-- 4. 删 agents.status 字段，新建 agent_runs 表（K-1）
+ALTER TABLE agents DROP COLUMN status;
+CREATE TABLE agent_runs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   agent_id    TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-  type        TEXT NOT NULL CHECK(type IN ('thinking','working','output','error','idle')),
-  detail      TEXT,
-  created_at  INTEGER NOT NULL
+  channel_id  TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  status      TEXT NOT NULL CHECK(status IN ('thinking','working','error','stopped')),
+  started_at  INTEGER NOT NULL,
+  ended_at    INTEGER,
+  error_msg   TEXT
 );
-CREATE INDEX idx_activity_agent ON agent_activity(agent_id, created_at DESC);
--- D-3: 每个 agent 保留最近 500 条（应用层清理）
+CREATE INDEX idx_agent_runs_active ON agent_runs(agent_id, channel_id) WHERE ended_at IS NULL;
+
+-- 5. agent_activity 加 channel_id（K-3）
+ALTER TABLE agent_activity ADD COLUMN channel_id TEXT REFERENCES channels(id) ON DELETE CASCADE;
+CREATE INDEX idx_activity_agent_channel ON agent_activity(agent_id, channel_id, created_at DESC);
 ```
 
-**其他交付**:
-- `packages/server/src/db/migrations.ts` 迁移机制（Up/Down）
-- Repository 层：`ChannelRepo` / `AgentRepo` / `MessageRepo` / `TaskRepo` / `ActivityRepo`
-- Seed 脚本（D-9）：首次启动预置 `#general` + Assistant Agent（若检测到 Codex）
+### 1.2 后端任务（4~5 天）
 
-### MVP-3: 后端 API + WebSocket
+#### 1.2.1 Repository / Service 重构
 
-**REST API 清单**:
+- [ ] 新增 `ProjectRepo`（CRUD + slug 唯一校验 + workspace_path 路径校验）
+- [ ] `ChannelRepo` / `AgentRepo` 加 `byProject(projectId)` 等方法
+- [ ] 新增 `AgentRunRepo`（startRun / endRun / activeRunsForAgent / activeRunsByChannel）
+- [ ] `MessageRouter` / `ContextBuilder` 改为按 channel → project 解析 cwd
+
+#### 1.2.2 REST API
 
 ```
-# Channels
-GET    /api/channels                     列出所有频道
-POST   /api/channels                     创建频道 { name, description, type }
-GET    /api/channels/:id                 频道详情
-PATCH  /api/channels/:id                 更新频道
-DELETE /api/channels/:id                 删除频道
-GET    /api/channels/:id/messages        频道消息列表 ?limit=50&before={messageId}&parent_id={threadId}
-GET    /api/channels/:id/agents          频道内 Agent 列表
-POST   /api/channels/:id/agents          加入 Agent { agent_id }
-DELETE /api/channels/:id/agents/:agentId 移除 Agent
-POST   /api/channels/:id/stop-all        停止频道内所有 Agent
+# Projects 新增
+GET    /api/projects                列出所有 Project
+POST   /api/projects                创建 Project { name, display_name?, workspace_path, goal, team_rules? }
+GET    /api/projects/:id            Project 详情
+PATCH  /api/projects/:id            更新 Project
+DELETE /api/projects/:id            删除（级联 channels / agents / messages / tasks）
+GET    /api/projects/:id/channels   该 Project 下所有 channels（替代原 GET /api/channels）
 
-# Agents
-GET    /api/agents                       列出所有 Agent
-POST   /api/agents                       创建 Agent { name, description, runtime, model, reasoning, env_vars }
-GET    /api/agents/:id                   Agent 详情
-PATCH  /api/agents/:id                   更新 Agent
-DELETE /api/agents/:id                   删除 Agent
-POST   /api/agents/:id/start             启动 Agent（stopped → idle）
-POST   /api/agents/:id/stop              停止 Agent（任意 → stopped）
-POST   /api/agents/:id/restart           重启（stop + delete workspace + start）
-GET    /api/agents/:id/activity          Activity 日志 ?limit=50&before={activityId}
-GET    /api/agents/:id/workspace         Workspace 文件树（返回目录结构）
+# Team Architect（新增系统 Agent 端点）
+POST   /api/projects/:id/suggest-team   { goal, workspace_path } → { agents: [...] }
 
-# Runtime Detection
-GET    /api/runtimes                     列出本地 CLI 检测结果 [{name, installed, version, path}]
+# Channels / Agents 旧端点
+- 移除全局 GET /api/channels（改为 GET /api/projects/:id/channels）
+- POST /api/channels 必须带 project_id
+- POST /api/agents 必须带 project_id
 
-# Tasks
-GET    /api/tasks                        全局 ?channel_id=xxx&status=todo
-POST   /api/tasks                        创建 { channel_id, title, assignee_agent_id, source_message_id? }
-GET    /api/tasks/:id                    任务详情
-PATCH  /api/tasks/:id                    更新（状态变更、重新分配等）
-DELETE /api/tasks/:id                    删除
+# Agent Status（改为派生）
+GET    /api/agents/:id/status       从 agent_runs 派生 { perChannel: { channelId: status }, anyActive: boolean }
 
-# Server Meta
-GET    /api/health                       { ok: true, version }
+# Workspace 端点删除（无 Agent sandbox）
+- 移除 GET /api/agents/:id/workspace
 ```
 
-**WebSocket 协议**（`ws://localhost:4179/ws`）:
+#### 1.2.3 WebSocket 协议升级
 
 ```typescript
-// Client → Server
-type ClientMessage =
-  | { type: 'subscribe_channel'; channel_id: string }
-  | { type: 'unsubscribe_channel'; channel_id: string }
-  | { type: 'send_message'; channel_id: string; thread_id?: string; content: string }
-  | { type: 'typing_start'; channel_id: string }
-  | { type: 'typing_stop'; channel_id: string };
-
-// Server → Client
+// agent_status 事件 payload 加 channel_id
 type ServerMessage =
-  | { type: 'message'; message: ChatMessage }
-  | { type: 'message_stream'; message_id: string; delta: string }
-  | { type: 'message_done'; message_id: string; final_content: string; metadata: MessageMetadata }
-  | { type: 'agent_status'; agent_id: string; status: AgentStatus; detail?: string }
-  | { type: 'system_event'; event: SystemEvent }
-  | { type: 'task_update'; task: Task }
-  | { type: 'error'; code: string; message: string };
+  | { type: 'agent_status'; agent_id: string; channel_id: string; status: AgentStatus; detail?: string }
+  // ... 其他保持
 ```
 
-**Message Router 职责**:
-- 解析用户消息中的 `@mention` 正则（支持中英文 Agent 名）
-- 根据 `thread_id` 路由到正确上下文构建器
-- 广播 `agent_status` / `system_event` 到所有订阅该频道的 WS 客户端
+订阅模型不变（仍按 channel 订阅），但状态广播粒度细化到 per-channel。
 
----
+#### 1.2.4 CLIRunner cwd 改造
 
-### Phase 1 验收清单
+```typescript
+// 原（v0）
+const cwd = `~/.slark/agents/${agent.id}/`;
 
-**必须逐项通过才能进入 Phase 2**：
-
-```bash
-# === MVP-1 ===
-- [ ] pnpm install 成功
-- [ ] pnpm dev 后 web 在 4178、server 在 4179 都起来
-- [ ] pnpm typecheck 零错误
-- [ ] pnpm lint 零错误
-
-# === MVP-2 ===
-- [ ] 首次启动自动创建 ~/.slark/slark.db
-- [ ] 包含 7 张表 + 所有约束与索引
-- [ ] Seed 数据：#general channel 存在
-- [ ] 如 cursor-agent 已安装，Assistant agent 存在且 joined #general
-
-# === MVP-3: REST ===
-- [ ] curl http://localhost:4179/api/health → { ok: true }
-- [ ] curl http://localhost:4179/api/channels → [{ id: "general", ... }]
-- [ ] curl http://localhost:4179/api/runtimes → 本机 CLI 检测结果
-- [ ] curl POST /api/agents 创建成功，返回 id
-- [ ] curl GET /api/agents/:id 返回刚创建的 agent
-- [ ] curl POST /api/channels/:id/agents { agent_id } 成功关联
-- [ ] curl GET /api/channels/:id/messages 空列表
-- [ ] curl POST /api/tasks 创建任务返回 id（自增）
-
-# === MVP-3: WebSocket ===
-- [ ] websocat ws://localhost:4179/ws 能建立连接
-- [ ] 发送 { type: "subscribe_channel", channel_id: "general" } 返回历史消息
-- [ ] 发送 { type: "send_message", channel_id: "general", content: "hi" }
-      → 另一个订阅者收到 { type: "message", message: {...} }
-- [ ] 插入 @mention 消息触发 agent_status 事件（此时 Agent 未接入，走 mock 即可）
-- [ ] 关闭连接再重连，订阅能恢复
+// 新（Sprint 1）
+const project = await projectRepo.byId(channel.project_id);
+const cwd = project.workspace_path;
 ```
 
----
+#### 1.2.5 Team Architect System Agent 实现
 
-## Phase 2: 核心引擎联调 (MVP-4 ~ MVP-6)
+**新增模块**：`packages/server/src/system-agents/team-architect.ts`
 
-**目标**: 第一次端到端演示 -- 用户在前端发消息，Agent 流式回复。
+**接口**：
+```typescript
+interface TeamSuggestion {
+  agents: Array<{
+    name: string;            // "Architect" / "Dev-Backend" / "Reviewer"
+    role: string;            // 简短角色标签
+    description: string;     // 完整 system prompt（500-1500 字符）
+    runtime: 'cursor';       // MVP 固定
+    model: string;           // 默认 'composer-2-fast'
+    reasoning: 'medium';     // 默认
+  }>;
+  rationale: string;         // 为什么推荐这个组合
+}
 
-### MVP-4: CLI Bridge 正式实现（仅 Cursor）
-
-- **MVP 适配器范围**: 仅 Cursor CLI（`cursor-agent`）
-- 从 `spike/src/` 迁移 `CLIAdapter` / `CursorAdapter` / `CLIRunner` / `ClaudeAdapter`（占位）到 `packages/server/src/agents/`
-- **Runtime 注册表**（支持未来扩展）:
-  ```typescript
-  const RUNTIME_REGISTRY = {
-    cursor: { impl: CursorAdapter, available: true },       // MVP 启用
-    codex:  { impl: CodexAdapter,  available: false, note: 'coming soon' },
-    claude: { impl: ClaudeAdapter, available: false, note: 'coming soon' },
-    kimi:   { impl: null,          available: false, note: 'coming soon' },
-    copilot:{ impl: null,          available: false, note: 'coming soon' },
-    gemini: { impl: null,          available: false, note: 'coming soon' },
-  };
-  ```
-  - Create Agent UI 显示 6 个选项，只有 Cursor 可选；其他标 "(coming soon)" 且 disabled
-- **CLIRunner 进程管理**（直接搬 `spike/src/runner.ts`，新增）:
-  - `spawn` + NDJSON stream parsing + timeout（D-5: 默认 300s）+ error recovery
-  - 状态机转移（D-2: 事件 → `idle/thinking/working/error`）
-  - **并发控制**（D-5: 最多 3 并发 + FIFO 队列 + 队列上限 20）← spike 未实现
-  - **预检查**（新增）: spawn 前检查 `cursor-agent --version`，失败时立即 error
-- **ContextBuilder**（新增）:
-  - Token 预算分配（D-4: 8000 total / 2000 description / 5500 history / 500 current）
-  - 历史消息截断：按 `"4 字符 ≈ 1 token"` 从最新往前累加，超出截断
-  - 团队成员列表注入（frame 中包含 `@Name — role` 列表）
-  - description 超限从中间截断
-- **ActivityRecorder**（新增）: 按 D-3 粒度写入 `agent_activity`
-- **workspace 管理**: Create Agent 时 `mkdir -p ~/.slark/agents/{id}/`，spawn 时 `cwd` 指向该目录
-
-### MVP-5: 前端 Shell
-
-**视觉基线**: 严格对照 [docs/ui-reference/](docs/ui-reference/README.md) 下的截图与规范实现。
-
-**子任务**:
-- 按 [design-tokens.md](docs/ui-reference/design-tokens.md) 配置 Tailwind theme（黄色 sidebar / 奶油色主区 / 粉色 CTA / 黑色 2px 边框 / 硬阴影）
-- 引入 Radix UI Primitives（Dialog、Popover、Dropdown、Tabs、Tooltip）作为无样式 a11y 基础
-- 按 [components.md](docs/ui-reference/components.md) 实现核心组件（MVP-5 范围见下表）
-- 按 [routes.md](docs/ui-reference/routes.md) 配置 React Router + `useSearchParams` 解析 URL 参数
-- 按 [local-adaptations.md](docs/ui-reference/local-adaptations.md) 砍掉多用户/云端相关 UI
-- **基础 Markdown 渲染**（react-markdown，支持 inline code 黄底高亮 / task 编号 `#N` 渲染 / @mention 内联样式）
-- Agent 消息流式渲染（逐字 `text_delta`，前端 16ms throttle 合并 re-render）
-- Error/Loading/Empty 状态按 [technical-decisions.md D-11](docs/technical-decisions.md#d-11) 实现
-
-**MVP-5 范围（必须实现）**:
-
-| 组件 | 参考截图 | MVP-5 必做 |
-|------|---------|-----------|
-| Sidebar Chat Tab | `10-channel-main-desktop.png` | ✓ |
-| Sidebar Members Tab | `02-sidebar-members-desktop.png` | ✓（简化：无 HUMANS / 无 Invite） |
-| Channel Header | `10-channel-main-desktop.png` | ✓ |
-| Channel Tab Strip (CHAT/TASKS) | `10-channel-main-desktop.png` | ✓ |
-| Message List (Agent/User/System 3 种) | `10-channel-main-desktop.png`、`20-dm-architect-desktop.png` | ✓ |
-| Message Input Box | 同上 | ✓（`As Task` 复选框占位，禁用） |
-| DM Header | `20-dm-architect-desktop.png` | ✓ |
-
-**MVP-5 不做**（移到 MVP-7/8/9）:
-- Agent Profile 右侧面板 → MVP-8
-- Thread Panel → MVP-7
-- Tasks 面板 → MVP-9
-- Create Agent Dialog → MVP-8
-- Stop All Agents Dialog → MVP-8
-
-### MVP-6: 端到端联调
-
-- 完整链路贯通：用户发消息 → WS → Message Router → Agent Engine → CLI Bridge spawn → stdout 流式 → WS 推送 → 前端渲染
-- Agent 状态实时同步（thinking / working / idle 切换通过 `agent_status` 事件推送，sidebar 状态点颜色变化）
-- 错误处理：
-  - CLI crash → system message 红色显示（D-11）
-  - CLI timeout → system message + Agent status → error
-  - parse failure → 静默忽略 + 写 activity log
-
----
-
-### Phase 2 验收清单
-
-**必须逐项通过**：
-
-```
-# === MVP-4: CLI Bridge ===
-- [ ] 单元测试：ContextBuilder 注入 5000 字符 description 时正确截断到预算内
-- [ ] 单元测试：ContextBuilder 注入 100 条历史消息时从最新倒序截断
-- [ ] 集成测试：通过 CLI Bridge 发送 "say hi" 给 Codex 适配器，10s 内收到完整 "hi" 响应
-- [ ] 集成测试：进程 spawn 时产生 activity 记录 (type=thinking)
-- [ ] 集成测试：同时发起 5 个请求，第 4、5 个进入队列，前 3 个完成后依次执行
-- [ ] 集成测试：kill 进程后 agent_status → error，Retry 后恢复正常
-- [ ] 集成测试：超时触发 error 状态 + system 消息
-
-# === MVP-5: 前端 Shell 视觉对齐 ===
-# 对每个组件，PR 中附上并排截图：左侧 slock.ai 参考 / 右侧 Slark 实现
-- [ ] Sidebar Chat Tab：活动频道粉色填充 + 未读 badge + description 等宽字体截断 —— 与 10-channel-main-desktop.png 对齐
-- [ ] Sidebar Members Tab：AGENTS 分组 + 机器 subheader + 状态点颜色 —— 与 02-sidebar-members-desktop.png 对齐
-- [ ] Channel Header：黄色 # icon + 描述 + 3 个右侧按钮 —— 与参考图对齐
-- [ ] Message 渲染（三种类型）：
-      Agent: pixel avatar + 名 + description + timestamp + 可选 task badge + "N replies"
-      User: purple avatar + "owner" 标签
-      System: timestamp + emoji prefix + 灰色文字
-- [ ] @mention 内联标签：黄底黑字 2px 边框小圆角
-- [ ] inline code `#27` / `spec_review`：等宽字体 + 黄底（task ref） / 浅底（code）+ 黑边
-- [ ] 块级 code：白底 + 黑边 + 圆角 + 跨行
-- [ ] Input Box：textarea + 附件 icon + "As Task" 占位 + Send 禁用/启用 pink
-
-# === MVP-5: 路由 ===
-- [ ] /channel/:id 可打开频道
-- [ ] /channel/:id?chatTab=tasks 切到 Tasks Tab 占位（此时空列表）
-- [ ] /dm/:id 可打开 DM
-- [ ] /?sidebarTab=members 切到 Members Tab
-- [ ] 浏览器刷新后 URL 状态保持
-
-# === MVP-5: 边缘态 ===
-- [ ] 未选择频道：显示 Welcome 页
-- [ ] 空频道：显示 "No messages yet"
-- [ ] 未安装任何 CLI：显示安装引导
-
-# === MVP-6: 端到端 ===
-- [ ] 在 #general 输入 "@Assistant 你好"
-- [ ] Sidebar 中 Assistant 状态点变橙色（thinking → working）
-- [ ] 主区出现 Assistant 消息卡片，字符逐字流式渲染
-- [ ] 完成后状态点变绿（idle）
-- [ ] 刷新页面，消息持久在 SQLite
-- [ ] 断开 WS 重连后消息继续存在
-- [ ] 强制 kill CLI 进程，频道出现红色 system 消息 "Assistant failed"
+async function suggestTeam(input: {
+  goal: string;
+  workspace_path: string;
+  workspace_hint?: { stack?: string; readme_excerpt?: string };
+}): Promise<TeamSuggestion>;
 ```
 
----
+**实现方式**：
+1. 用 CursorAdapter spawn 一次特殊 prompt
+2. 内置 description 模板（不暴露给用户）：
+   ```
+   You are a Team Architect for an AI engineering team. Given a project goal,
+   recommend a team of 3~5 AI agents with clear roles. Reply with strict JSON:
+   { agents: [...], rationale: "..." }
+   ```
+3. 解析 JSON → 返回 TeamSuggestion
+4. 失败时（非 JSON / 解析错）：返回兜底默认（Architect + Dev + Reviewer 三件套）
 
-## Phase 3: 协作与配置 (MVP-7 ~ MVP-9)
+**Q-2 决议落地**：如果 cursor-agent 未安装，`POST /api/projects/:id/suggest-team` 直接返回兜底默认 + 提示用户手动调整。
 
-**目标**: 多 Agent 链式协作 + Agent 管理 UI + 任务系统。
+#### 1.2.6 Seed 数据重写（D-9 v1.0）
 
-### MVP-7: @mention 链式触发 + Thread
+```typescript
+// 旧（v0）
+- 创建 #general
+- 检测 cursor-agent → 创建 Assistant Agent
 
-- Agent 回复中 `@mention` → 自动触发下一个 Agent（在同一 Thread 内）
-- Thread 自动创建：首次在消息上触发 Agent 响应时，系统将响应作为 Thread 子消息，根消息保留在频道主线
-- **Thread Panel UI 作为右侧第 3 栏**（参考 `50-thread-panel-desktop.png`）
-  - Header: `Thread — @AgentName` + "View in channel" 按钮（滚动到源消息）+ 关闭 ✕
-  - 消息列表（仅 Thread 内）
-  - 底部输入框：placeholder `"Message thread"`，**无 As Task 复选框**
-- 频道主线只显示顶层消息（`parent_id IS NULL`）+ "N replies" 按钮（点击打开 Thread Panel）
-- 链式防护（D-6）：
-  - `max_chain_depth=10` 超限 → 停止 + system message "Chain depth limit reached"
-  - 同 agent 连续触发 >3 → 停止 + system message "Possible infinite loop detected"
-  - 超限事件写入 `messages.metadata_json.system_event = { type: 'chain_limit_reached' }`
-
-### MVP-8: Agent 配置 UI
-
-- **Create Agent 对话框**（对照 `60-create-agent-desktop.png`、`62-create-agent-advanced.png`）
-  - 字段: Name * / Description / Runtime / Model / Reasoning Effort / > Advanced (Env Vars)
-  - **不做 Machine 字段**（本地版去除，见 `local-adaptations.md`）
-  - Runtime 下拉调 `GET /api/runtimes` 返回本地检测结果
-  - 未安装显示 "(not installed)" 且 disabled
-  - Model 下拉根据 Runtime 动态更新（Codex → GPT-5.4 等；Claude → Sonnet/Haiku 等）
-  - 提交后自动 `mkdir -p ~/.slark/agents/{id}/` 并加入当前频道
-- **Agent Profile 右侧面板**（对照 `40-agent-profile-desktop.png`）
-  - **3 个 Tab**: PROFILE / WORKSPACE / ACTIVITY（**无独立 Settings Tab**）
-  - Profile Tab 包含: avatar / name / status dot + 文字 / @handle / DISPLAY NAME (可编辑) / DESCRIPTION (可编辑) / INFO (Runtime/Model/Reasoning tags，不含 Machine 行) / Born / ENVIRONMENT VARIABLES (可编辑) / ACTIONS
-  - ACTIONS 区按钮: Start Agent (白底) / Restart / Reset (白底) / Report Issue (pink bg) / Delete Agent (red bg)
-  - Workspace Tab: 展示 `~/.slark/agents/{id}/` 的目录树（只读）
-  - Activity Tab: 实时 activity 日志（`GET /api/agents/:id/activity`，WS 实时增量）
-- **Stop All Agents Dialog**（参考 `30-stop-all-agents-dialog.png`）
-  - 触发：Channel Header 左二按钮（□ 图标）
-  - 调 `POST /api/channels/:id/stop-all`
-
-### MVP-9: Tasks 面板
-
-- **频道内 Tasks Tab**（对照 `12-channel-tasks-desktop.png`）
-  - 状态过滤: All / Todo / In Progress / In Review / Done（每个带数量 badge）
-  - "+ New Task" 按钮（pink）
-  - Task 行: 展开箭头 / `#N` 编号 / 状态 badge / 描述 / assignee 标签 / 删除按钮
-  - 已完成任务折叠成 "N done" 组
-  - 拖拽或点击状态 badge 可切换状态（MVP 支持点击，拖拽进迭代）
-- **Task 系统消息**（写入 `messages` 表 `sender_type='system'`，`metadata_json.system_event` 见 D-7）:
-  - 创建: `"📝 1 new task created: #27 \"...\""`
-  - claim（Agent 接收任务）: `"📌 Reviewer claimed #27 \"...\""`
-  - moved: `"✅ User moved #23 \"...\" to Done"`
-- **Task 分配**: 新建任务时可选 assignee（下拉选该频道内的 Agent）
-
-**MVP 不做**（延后到 Phase 4+）:
-- 全局 `/tasks` Kanban 看板
-- "As Task" 复选框逻辑（保留 UI 但禁用）
-- Task 拖拽排序
-- Task 评论/子任务
-
----
-
-### Phase 3 验收清单（4 个独立可测场景）
-
-**场景 A：基本 @mention 触发 (MVP-7 前半)**
-```
-- [ ] 在 #general 输入 "@Assistant 你好"
-- [ ] 消息卡片中 "@Assistant" 渲染为黄底黑字 inline tag
-- [ ] Assistant 状态点 idle→thinking→working→idle
-- [ ] Assistant 回复出现在频道，卡片含 pixel avatar + 名 + description 截断 + 时间戳
-- [ ] 流式字符渲染（肉眼可见逐字输出，不是一次性弹出）
-- [ ] 刷新后消息持久
+// 新（Sprint 1）
+- 不预置任何 Project / Channel / Agent
+- 启动时检查 projects 表为空 → 前端展示欢迎页 "Create your first Project"
 ```
 
-**场景 B：链式触发 + Thread (MVP-7)**
-```
-前提：创建 2 个 Agent（如 Architect, Dev-Main），都加入 #general
+### 1.3 前端任务（3~4 天）
 
-- [ ] 用户发: "@Architect 把 XXX 功能拆给 @Dev-Main"
-- [ ] Architect 回复中包含 "@Dev-Main ..."
-- [ ] Message Router 自动触发 Dev-Main
-- [ ] Dev-Main 响应进 Thread 而非频道主线（parent_id != NULL）
-- [ ] 频道主线 Architect 消息底部显示 "1 replies" 按钮
-- [ ] 点击 "1 replies" → 右侧 Thread Panel 从右滑入（第 3 栏）
-- [ ] Thread Panel Header "Thread — @Architect"
-- [ ] Thread Panel 列出 Architect 消息 + Dev-Main 回复
-- [ ] Thread 输入框 placeholder "Message thread"，无 As Task
-- [ ] Thread 内再 @mention 第三个 Agent → 继续触发在同 Thread 内
-- [ ] 触发 max_chain_depth=10 → Thread 出现红色 system "Chain depth limit reached"
-- [ ] 关闭 Thread 面板，频道主线仍只显示顶层消息
-- [ ] 浏览器刷新后 Thread Panel 状态保持（通过 URL ?thread= 参数）
+#### 1.3.1 Sidebar Project 切换器
+
+- 顶部添加 Project 下拉（替换原 KaisTeam 占位）
+- 显示当前 Project 的 display_name + workspace_path 缩写
+- 下拉项：所有已存在的 Project + 一条 "+ New Project" 触发 Create Project Dialog
+- 切换 Project 后：刷新 Channels / DMs / Members 列表，路由跳转到该 Project 的 #general
+
+#### 1.3.2 Create Project 向导（核心 UX）
+
+**三步式**：
+
+```
+Step 1: Project Basics
+  - Name (URL slug, 必填，自动小写连字符化)
+  - Display Name (可选，默认同 Name)
+  - Workspace Path (必填，"Pick Folder" 按钮调原生选择器)
+  - Goal (必填，textarea，max 500 字符，下方计数)
+  - Team Rules (可选，textarea)
+  
+  [Cancel] [Next →]
+
+Step 2: AI Team Suggestion
+  - Loading 动画："Team Architect is analyzing your goal..."
+  - 5~10 秒后显示推荐卡片：
+    
+    Based on your goal, we recommend:
+    
+    ┌─────────────────────────────┐
+    │ ✓ Architect                  │
+    │   Designs API and data model │
+    │   [Edit] [Remove]            │
+    └─────────────────────────────┘
+    ┌─────────────────────────────┐
+    │ ✓ Dev-Backend                │
+    │   ...                        │
+    └─────────────────────────────┘
+    
+    Rationale: ...
+    
+    [+ Add Custom Agent]
+    [← Back] [Approve & Create]
+
+Step 3: Done
+  - "Project created! Jumping to #general..."
+  - 自动跳转 /p/{name}/channel/general
 ```
 
-**场景 C：Create Agent 全流程 (MVP-8)**
+**降级策略**（Q-2）：
+- 检测到无 cursor-agent → Step 2 直接显示兜底默认 + 黄色提示 "Cursor CLI not detected, showing default team. Install cursor-agent to enable AI team suggestion. [Install Guide]"
+
+#### 1.3.3 Welcome 页改造
+
+- v0：检测有 #general → 直接进入；否则空白
+- 新：检测 projects 表为空 → 显示 Welcome 页
+  - "Welcome to Slark"
+  - "Create your first Project to start"
+  - 大按钮 [+ New Project]（触发 Create Project 向导）
+  - 下方小字介绍 Slark 是什么
+
+#### 1.3.4 路由重构
+
 ```
-- [ ] Sidebar 切到 Members Tab，点击 AGENTS 旁的 [+]
-- [ ] Create Agent Dialog 打开，视觉与 60-create-agent-desktop.png 对齐
-- [ ] 未填 Name 时 "Create Agent" 按钮 disabled 褪色
-- [ ] Runtime 下拉：已安装的（如 Codex CLI）可选；未装的显示 "(not installed)" 且 disabled
-- [ ] 选 Codex CLI 后 Model 下拉自动刷新为 GPT-5.4 等选项
-- [ ] 点 "> Advanced" 展开 Environment Variables 区
-- [ ] "+ Add Variable" 添加 KEY=VALUE 条目
-- [ ] 填 Name="Alice" + Description + Runtime + Model 后，按钮变 pink 可点
-- [ ] 点 "Create Agent"：
-      1. Dialog 关闭
-      2. Sidebar AGENTS 列表立刻出现 Alice（带绿色状态点）
-      3. 文件系统创建 ~/.slark/agents/{id}/
-      4. Alice 加入当前频道（channel_agents 表）
-- [ ] 点击 Sidebar 中 Alice → 打开 DM
-- [ ] 在 DM 输入 "hello" → Alice 状态点变橙色 → 流式回复 → 变绿
-- [ ] 点 DM 头部 Alice 头像 → 右侧 Profile 面板打开（第 3 栏）
-- [ ] Profile 有 3 Tab：PROFILE / WORKSPACE / ACTIVITY
-- [ ] Profile Tab 显示 name / description / Runtime/Model/Reasoning tags / Born / Env Vars
-- [ ] ACTIONS 区有 Start/Restart/Report Issue/Delete
-- [ ] 点 Delete Agent → 确认弹窗 → Alice 从 sidebar 消失 + 频道消息中 Alice 的卡片仍保留但头像灰色
-- [ ] 频道 Header 左二按钮 → Stop All Agents Dialog（与 30-stop-all-agents-dialog.png 视觉对齐）
+原:  /channel/:id  /dm/:id
+新:  /p/:projectName/channel/:channelId
+     /p/:projectName/dm/:dmId
+     /p/:projectName/welcome  (无 channel 时)
+     /                         (无 Project 时全局 Welcome)
 ```
 
-**场景 D：Task 生命周期 (MVP-9)**
+- 所有现有路由相关组件按新格式更新
+- URL query 参数（`?profile=` / `?thread=` / `?chatTab=` 等）保持不变
+
+#### 1.3.5 Agent Profile 简化
+
+- 删除 WORKSPACE Tab 整体（包含其下文件树 / Refresh 按钮等组件）
+- Tab Strip 从 3 个 Tab 改为 2 个：PROFILE / ACTIVITY
+- ACTIVITY Tab 加一个简单的 "filter by channel" 下拉（基于新加的 channel_id）
+
+#### 1.3.6 StatusDot 改造
+
+- 原 Sidebar 显示 Agent 全局状态点
+- 改：根据"是否有 active agent_run"派生状态（任意 channel 在跑就是 working）
+- DM Header 等显示当前 channel 的具体状态（更细粒度）
+
+### 1.4 清理任务（0.5 天）
+
+- [ ] 删除 `~/.slark/agents/` 目录创建逻辑
+- [ ] 删除 D-8 旧 workspace 相关代码（路径校验 / mkdir / 删除等）
+- [ ] 删除 v0 Seed 中的 `#general` 自动创建逻辑
+- [ ] 删除 GET /api/agents/:id/workspace 端点
+- [ ] 文档同步：technical-decisions.md D-8 / D-9 按 product-brief v1.0 改写
+
+### 1.5 Sprint 1 验收清单
+
 ```
-- [ ] 频道内切换到 TASKS Tab，显示 "All 0 / Todo / In Progress / In Review / Done"
-- [ ] 点 "+ New Task" → 出现输入对话框（title + 可选 assignee 下拉）
-- [ ] 填写标题 "测试任务" + assignee=Alice，提交
-- [ ] TASKS 列表立刻出现 #1 任务，状态 TODO（橙 badge）
-- [ ] 切回 CHAT Tab，看到 system 消息 "📝 1 new task created: #1 \"测试任务\""（metadata_json.system_event.type='task_created'）
-- [ ] 切回 TASKS，点击 #1 状态 badge → 切到 In Progress（青 badge）
-- [ ] 切回 CHAT，看到 "📌 Alice claimed #1 ..."
-- [ ] TASKS 再切到 In Review（紫 badge）→ CHAT 出现 "** Alice moved #1 to In Review"
-- [ ] 再切到 Done → CHAT 出现 "✅ User moved #1 to Done"
-- [ ] TASKS 列表中 #1 自动折叠进 "1 done" 组
-- [ ] 过滤按钮点 "Done" → 只显示已完成任务
-- [ ] 过滤按钮点 "All" → 全部显示
-- [ ] 点 #1 删除按钮 → 确认后消失
-- [ ] SQLite 持久化：刷新页面，Tasks 与系统消息都还在
+# === Schema 与基础数据 ===
+- [ ] 启动 Slark，~/.slark/slark.db 自动创建（projects/agent_runs 表存在）
+- [ ] 旧 agents.status 字段已删除
+- [ ] 旧 ~/.slark/agents/ 目录不再创建
+- [ ] 首次启动 Web UI 显示 Welcome 页（不再有 #general）
+
+# === Create Project 三步向导 ===
+- [ ] Step 1：Name / Workspace / Goal 必填校验生效，Goal 超 500 字符报错
+- [ ] Step 2：5~10 秒内显示 Team Suggestion 卡片（≥3 个 Agent）
+- [ ] Step 2 兜底：手动改名 cursor-agent 路径模拟未安装 → 走兜底默认 + 黄色提示
+- [ ] Step 3：自动跳转到 /p/{name}/channel/general，#general 频道存在，所有 Agent 加入
+- [ ] 数据库验证：projects / channels / agents / channel_agents 都按预期插入
+
+# === 路由 ===
+- [ ] /p/{name}/channel/{id} 可访问对应频道
+- [ ] /p/{name}/dm/{id} 可访问对应 DM
+- [ ] / 在无 Project 时显示 Welcome
+- [ ] / 在有 Project 时跳转到第一个 Project 的 #general
+- [ ] Sidebar Project 切换器切换后整个左侧 + 主区刷新
+
+# === 隔离修复（K-1/K-3/K-4）===
+- [ ] 创建 2 个 Project（Slark / Blog），各自带 1 个同名 Architect
+  - Architect@Slark 的 spawn cwd = Slark workspace_path
+  - Architect@Blog 的 spawn cwd = Blog workspace_path
+  - 在 Slark 项目里 ls 能看到 Slark 源码，在 Blog 项目里 ls 能看到 Blog 源码
+- [ ] 在两个 Project 的 #general 同时 @ 各自 Architect
+  - agent_runs 表出现两条 active 记录（不同 channel_id）
+  - 两个 Architect 的对话历史完全隔离
+- [ ] WebSocket agent_status 事件 payload 含 channel_id
+- [ ] StatusDot 派生：Sidebar 显示"任意 channel 在跑"为 working
+
+# === Agent Profile 简化 ===
+- [ ] Profile 面板只有 2 Tab：PROFILE / ACTIVITY
+- [ ] Activity Tab 有 "filter by channel" 下拉
+- [ ] 不再有 WORKSPACE Tab、不再展示 ~/.slark/agents/ 文件树
+
+# === 端到端体验（核心 S-1 验收）===
+- [ ] 一个新人从启动 Slark 到 "在某个 Project 的频道里发出第一条 @ 消息" ≤ 3 分钟
+- [ ] 在 #general 输入 "@Architect 你好"，Architect 状态点变橙 → 流式回复 → 变绿
+- [ ] 刷新页面，消息持久
+- [ ] 强制 kill cursor-agent 进程，频道出现红色 system 消息
 ```
 
 ---
 
-## 后续迭代（MVP 之后）
+## Sprint 2: Workflow Framework（甬道落地 - Template 路径）
 
-- "As Task" 发消息自动创建任务
-- Agent-to-Agent DM（Agent 主动给另一个 Agent 发 DM）
-- Team Memory 注入（团队级 Ground Rules / 共享 Spec）
-- Search 全局搜索 (Cmd+K)
-- Saved 收藏消息
-- Agent Workspace 文件浏览器
-- Agent Activity 独立日志页
-- Kimi CLI / Gemini CLI 适配器
-- 深色/浅色主题
-- 键盘快捷键
-- 代码块语法高亮
+**目标**: 内置 3 个 Workflow 模板，用户 `/new-feature` 等指令可驱动整个 thread 按 step 自动推进。
+
+**战略价值**: Slark 从"聊天室"跃升为"工作流引擎"。
+
+**预估工期**: 6~8 工作日
+
+### 范围
+
+- [ ] Schema：`workflows` / `workflow_runs` 表
+- [ ] YAML 解析器（含 step 引用 / on_complete / on_approve / on_reject 路由）
+- [ ] Workflow Runner（执行引擎）
+  - 状态机：running / completed / aborted / failed
+  - 单步执行 → 等结果 → 推进下一步
+  - 超时 / kill / abort 处理
+- [ ] 3 个内置模板：`feature-development` / `bug-fix` / `research`
+  - 模板首次进入 Project 时自动 import（或按需 import）
+- [ ] Channel 输入框支持 `/command` 检测 → 触发 Workflow Runner
+- [ ] Thread 内 Workflow 进度可视化
+  - 顶部进度条："Step 2/5: implement → @Dev-Backend"
+  - 已完成步骤打勾 + Agent 头像
+  - 当前步骤高亮
+- [ ] Responsibilities 简化版：从 YAML 自动推导 executor，写入 `responsibilities` 表（schema 见 Sprint 3）
+
+### 待决议
+
+- Q-4：Workflow YAML 的版本控制 → 建议默认存 SQL + 提供 Export
+
+### 验收（关键）
+
+- [ ] 在 Slark 频道输入 `/new-feature add OAuth`
+- [ ] 自动创建 thread，进度条显示 "Step 1/5: design → @Architect"
+- [ ] Architect 完成方案后，自动等用户 Approve（thread 内出现 Approval Card）
+- [ ] 用户点 Approve → 自动 @Dev-Backend，进入 Step 3
+- [ ] Dev-Backend 完成后自动 @Reviewer
+- [ ] Reviewer reject → 回到 implement step（进度条回退）
+- [ ] Reviewer approve → done step → thread 自动归档
 
 ---
 
-## 关键技术决策
+## Sprint 3: Responsibility + User Intervention
+
+**目标**: Workflow 中用户可以随时介入、批准、拒绝、override；Workflow 可以导入导出。
+
+**战略价值**: AI 团队**有边界、可控、可审计**。
+
+**预估工期**: 4~5 工作日
+
+### 范围
+
+- [ ] `responsibilities` 表（按 product-brief D-5）
+- [ ] Approval Flow：`await_approval` step 的 UI 卡片 + 自动 Notification
+- [ ] Slark 内联指令协议（参考 `clawteam-comparison.md` B-2）：
+  - `/approve` / `/reject` / `/abort` / `/override` / `/comment`
+  - 后端 message-router 解析指令 → 路由到 workflow_runs 状态机
+- [ ] Inbox 视图（待批准动作汇总）—— 可选 P1
+- [ ] Workflow YAML Import / Export（文件下载 + 上传）
+
+### 验收
+
+- [ ] 用户可以中断正在运行的 Workflow（`/abort`）
+- [ ] 用户可以在 await_approval step 输入反馈再 reject（`/reject 这里需要补充错误处理`）
+- [ ] reject 时反馈作为下一轮 spawn 的额外 context 注入
+- [ ] Workflow Export 出 YAML，Import 回另一个 Project 后能正常运行
+
+---
+
+## Sprint 4: Delivery Loop + Team-First-Collaborative
+
+**目标**: 每个 Workflow Run 结束后自动沉淀知识；引入 Team-First 协同设计 Workflow 能力。
+
+**战略价值**: 项目知识资产自动积累；Slark 核心差异化能力（Team-First-Collaborative）首次上线。
+
+**预估工期**: 7~9 工作日
+
+### 范围
+
+- [ ] **Scribe System Agent**
+  - 触发：Workflow Run 完成 / Thread 解决 / 用户手动 `/sediment`
+  - 实现：spawn 一个特殊 prompt，输入完整 thread + tool_calls
+  - 输出：JSON 数组 `[{ kind, title, body, audience, source_message_id, confidence }]`
+- [ ] `decisions` / `lessons` 表（按 product-brief 的两个表设计）
+- [ ] Project 新增 **Intelligence Tab**（与 CHAT/TASKS Tab 平级）
+  - Pending Review 队列（Scribe 待审批的条目）
+  - Knowledge Base 浏览（按 kind / audience / tags 过滤）
+  - Decisions 时间线
+- [ ] ContextBuilder 升级：按 audience + 关键词过滤注入 lessons / decisions（token 预算内）
+- [ ] **Facilitator System Agent**（Team-First-Collaborative 路径）
+  - 触发：Sprint 4 先**手动触发**（Q-8 决议建议）
+  - 实现：在一个特殊 thread 里串行 spawn 各 Team 成员发表协作意见 → Facilitator 综合成 YAML
+  - 用户 Approve 后写入 `workflows` 表
+
+### 待决议
+
+- Q-5：System Agent token 配额
+- Q-7：lessons 是否跨 Project 共享
+- Q-8：Facilitator 自动 vs 手动触发
+
+### 验收
+
+- [ ] 跑完一个 `/new-feature` 后，Intelligence Tab 出现 Pending Review 条目
+- [ ] 条目内容合理（不是空话或重复 description）
+- [ ] Approve 后 lessons 表有数据
+- [ ] 下次 spawn 同 audience 的 Agent 时，prompt 里能看到注入的 lesson
+- [ ] 手动触发 Facilitator → 5 分钟内产出 Workflow draft → 用户 Approve → workflows 表多一条
+
+---
+
+## Sprint 5: Evolution Loop（Agent 成长）
+
+**目标**: Agent description 会随时间演化，团队越用越强。
+
+**战略价值**: 达成 S-6 成功标准 —— "连续使用 3 个月后 Agent 团队交付质量提升"。
+
+**预估工期**: 5~7 工作日
+
+### 范围
+
+- [ ] **Evaluator System Agent**（后台定期）
+  - cron：每 24h 一次（可配）
+  - 输入：每个 Agent 最近 N 个 task 的产出（messages + tool_calls）
+  - 输出：`agent_observations` 表（待机制确定）
+- [ ] **Coach System Agent**（提建议）
+  - 触发：Evaluator 发现 ≥3 次同类问题
+  - 输出：`agent_feedback` 表，含建议的 description diff
+- [ ] Agent Profile 新增 **FEEDBACK Tab**
+  - 列出 Coach 历史建议（pending / applied / rejected）
+  - 每个建议带 description 的前后 diff
+  - [Apply] 按钮 → 实际更新 `agents.description` + 标记 applied
+  - [Reject] 按钮 → 标记 rejected
+- [ ] Apply 后的回滚机制（保留 diff 历史，可逆）
+
+### 待决议
+
+- Q-6：Apply 后能否回滚 → 决议建议 "能"
+
+### 验收
+
+- [ ] 制造场景：让一个 Agent 连续 3 次回复都漏掉某要素
+- [ ] 24h 后 Agent Profile FEEDBACK Tab 出现 Coach 建议
+- [ ] Apply 后 agents.description 实际更新（数据库验证）
+- [ ] 下次 spawn 时新 description 生效（验证回复行为）
+- [ ] Apply 后能 Rollback 到原版本
+
+---
+
+## Sprint 6: Onboarding Loop + Skill Matrix
+
+**目标**: 新 Project 自动生成 onboarding 包；Agent 能力地图自动维护。
+
+**预估工期**: 5~7 工作日
+
+### 范围
+
+- [ ] **Onboarder System Agent**
+  - 触发：Create Project 后第一个 Agent spawn 前
+  - 输入：workspace_path 下的 README.md / package.json / git log 最近 N commit
+  - 输出：`project_onboarding` 表（overview / tech_stack / conventions）
+  - Onboarding 卡片在 Welcome 页 / Channel Header 处可见
+- [ ] `agent_skills` 表（按 product-brief）
+  - tool_call 后自动统计该 Agent 在哪些目录 / 模块下工作过
+  - 触发：每次 tool.completed 事件
+- [ ] Create Task 智能推荐 assignee
+  - 用户输入 task title → 服务端关键词匹配 agent_skills.skill_key
+  - assignee 下拉默认排序：匹配度高的在前
+
+### 验收
+
+- [ ] 在一个真实 git 仓库（非 Slark 自身）创建 Project，Onboarding 卡片正确显示技术栈
+- [ ] 让 Agent 在 src/auth/ 下读写多次后，agent_skills 表有 'auth/' 记录
+- [ ] Create Task 输入 "fix auth bug"，assignee 下拉自动推荐之前在 auth/ 工作的 Agent
+
+---
+
+## Sprint 7+: 远期路线
+
+按 product-brief.md §7 (P2 R-18~R-25) 排序：
+
+| 项目 | 描述 | 优先级 |
+|-----|------|--------|
+| **R-18** Codex / Claude Code 多 runtime 适配 | 接入 Codex / Claude / Kimi / Copilot / Gemini Adapter | 🟡 中 |
+| **R-19** 跨 Project 全局视图 | `/threads` / `/tasks` / `/saved` Kanban | 🟡 中 |
+| **R-20** Team Memory（Project 级 ground rules）| 用 lessons 表已半实现 | 🟢 低 |
+| **R-21** Agent / Workflow Template Marketplace | 用户可分享 Workflow YAML / Team Template | 🟢 低 |
+| **R-22** `.slark/team.yaml` Project 级 Agent 定义 | git 可追踪 | 🟢 低 |
+| **R-23** Electron / Tauri 打包 | 桌面应用 + 系统托盘 | 🟢 低 |
+| **R-24** Agent 之间主动 DM | 非 @mention 触发 | 🟢 低 |
+| **R-25** Project 拖拽排序、收藏、归档 | UX 打磨 | 🟢 低 |
+| **B-1** Worktree 多 Agent 隔离（见 clawteam-comparison）| 解决 K-5 / W-1 | 🔴 高（多 Agent 真正并发改代码时必须） |
+| **B-6** Tiled Live View（多 Agent 并排实时输出）| Slark 相对 ClawTeam 的差异化机会 | 🟡 中 |
+
+---
+
+## 关键技术决策（保留 / 更新）
 
 - **为什么不用 MCP**: 本地场景直接 spawn CLI 比 MCP 更简单直接
 - **为什么用 SQLite**: 零配置单文件，适合本地应用
 - **为什么用 WebSocket**: 需要双向通信（发消息 + 流式响应 + 状态更新）
 - **为什么用适配器模式**: 不同 CLI 接口差异大，适配器解耦核心逻辑
 - **为什么 spawn-per-message**: CLI 工具原生设计就是单次执行，不支持持续对话
-- **记忆哲学**: Slark 不接管 CLI 工具自身记忆（CLAUDE.md 等），只负责通信通道和消息持久化
+- **为什么 Agent 无独立 workspace（v1.0 修订）**: 聚焦编程协作 + 不接自主学习型 Agent，记忆通过 ContextBuilder 注入 + Coach 演化 description 承载
+- **为什么 Workflow 用声明式 YAML**: 类比 GitHub Actions，工程师友好；同时为 Sprint 4 的 "Team 协同设计 Workflow" 留下"Facilitator 输出 YAML"的标准接口
+- **为什么 Project 是一等公民（v1.0 修订）**: Server = Project 是 slock.ai 原版的等价语义；多 Project 并发时上下文 / Tasks / Knowledge 都按 Project 隔离
+
+---
+
+## 版本历史
+
+| 版本 | 日期 | 变更 |
+|------|------|------|
+| v0.1 ~ v0.3 | 2026-04-22 | 原 4 Phase / MVP-1~9 结构（v0 MVP 已交付） |
+| **v1.0** | 2026-04-23 | **按 product-brief.md v1.0 重写**：保留 Phase 0/0.5；折叠 v0 MVP 为已交付清单；展开 Sprint 1~6 Programmable AI Team OS 路线；Sprint 1 详细任务与验收落地 |
