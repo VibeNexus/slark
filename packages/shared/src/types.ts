@@ -208,3 +208,31 @@ export interface RuntimeDetection {
   /** MVP 当前 Slark 端是否已实装该 runtime（未实装会 disable） */
   enabled_in_slark: boolean;
 }
+
+// =============================================================================
+// Team Architect System Agent（v1.0 / D-15 / D-19）
+// =============================================================================
+
+/**
+ * 一个 Team Architect 推荐的 Agent 候选项。
+ *
+ * runtime 允许空串 '' 表示兜底场景（Q-2 决议，未装 cursor-agent 时）；
+ * 此时用户必须在 Approve 后手动配置 runtime/model 才能 spawn。
+ */
+export interface TeamSuggestionAgent {
+  name: string;
+  role: string;
+  description: string;
+  runtime: Runtime | '';
+  model: string;
+  reasoning: ReasoningEffort;
+}
+
+export interface TeamSuggestion {
+  agents: TeamSuggestionAgent[];
+  rationale: string;
+  /** true = 走了固定三件套兜底（Review 5） */
+  is_fallback: boolean;
+  /** 兜底触发的具体原因（仅 is_fallback = true 时存在） */
+  fallback_reason?: string;
+}

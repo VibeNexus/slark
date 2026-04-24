@@ -11,6 +11,7 @@ import type {
   RuntimeDetection,
   Task,
   TaskStatus,
+  TeamSuggestion,
   ReasoningEffort,
   Runtime,
 } from '@slark/shared';
@@ -71,6 +72,17 @@ export const updateProject = (id: string, patch: Partial<Project>) =>
   });
 export const deleteProject = (id: string) =>
   request<void>(`/api/projects/${id}`, { method: 'DELETE' });
+
+// Team Architect（Create Project Step 2 用）
+export const suggestTeam = (data: {
+  goal: string;
+  workspace_path: string;
+  workspace_hint?: { stack?: string; readme_excerpt?: string };
+}) =>
+  request<TeamSuggestion>('/api/projects/suggest-team', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
 
 // Channels
 export const listChannels = () => request<Channel[]>('/api/channels');
