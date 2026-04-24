@@ -2,7 +2,11 @@
  * Agent Profile 右侧面板
  * 参考: docs/ui-reference/screenshots/40-agent-profile-desktop.png + 41-agent-profile-actions.png
  *
- * 3 Tab: PROFILE / WORKSPACE / ACTIVITY（无独立 Settings，settings 字段都在 Profile 下）
+ * v1.0 修订（Sprint 1 CP6 / D-8）：
+ *   - 从原版 3 Tab 简化为 2 Tab：PROFILE / ACTIVITY
+ *   - 删除 WORKSPACE Tab（Slark 不再提供 Agent 独立 workspace；
+ *     项目代码由 project.workspace_path 承载，Agent 无私人沙盒展示位）
+ *   - FEEDBACK Tab 将在 Sprint 5 Evolution Loop 上线作为第 3 Tab
  */
 
 import { useEffect, useState } from 'react';
@@ -12,7 +16,6 @@ import { cn } from '../lib/cn';
 import {
   deleteAgent,
   getAgentActivity,
-  getAgentWorkspace,
   restartAgent,
   startAgent,
   stopAgent,
@@ -27,7 +30,7 @@ interface Props {
   agent: Agent;
 }
 
-type TabKey = 'profile' | 'workspace' | 'activity';
+type TabKey = 'profile' | 'activity';
 
 export function AgentProfilePanel({ agent }: Props) {
   const [params, setParams] = useSearchParams();
@@ -95,13 +98,10 @@ export function AgentProfilePanel({ agent }: Props) {
         </IconButton>
       </header>
 
-      {/* 3 Tab */}
+      {/* 2 Tab（v1.0 CP6 简化，原 WORKSPACE Tab 已删除） */}
       <div className="flex border-b-2 border-black">
         <TabButton active={tab === 'profile'} onClick={() => setTab('profile')}>
           <ProfileIcon /> PROFILE
-        </TabButton>
-        <TabButton active={tab === 'workspace'} onClick={() => setTab('workspace')}>
-          <FolderIcon /> WORKSPACE
         </TabButton>
         <TabButton active={tab === 'activity'} onClick={() => setTab('activity')}>
           <ActivityIcon /> ACTIVITY
@@ -110,7 +110,6 @@ export function AgentProfilePanel({ agent }: Props) {
 
       <div className="flex-1 overflow-y-auto">
         {tab === 'profile' && <ProfileTab agent={agent} onDelete={actionHandlers.delete} onStart={actionHandlers.start} onStop={actionHandlers.stop} onRestart={actionHandlers.restart} />}
-        {tab === 'workspace' && <WorkspaceTab agent={agent} />}
         {tab === 'activity' && <ActivityTab agent={agent} />}
       </div>
     </aside>
@@ -255,62 +254,6 @@ function ProfileTab({
           </ActionButton>
         </div>
       </div>
-    </div>
-  );
-}
-
-function WorkspaceTab({ agent }: { agent: Agent }) {
-  const [tree, setTree] = useState<Array<{ name: string; type: string }>>([]);
-  const [path, setPath] = useState<string>('');
-  const [error, setError] = useState<string | null>(null);
-
-  const load = async () => {
-    try {
-      const ws = await getAgentWorkspace(agent.id);
-      setPath(ws.path);
-      setTree(ws.tree);
-      setError(null);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-
-  useEffect(() => {
-    void load();
-  }, [agent.id]);
-
-  return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center gap-2 font-mono text-xs text-text-secondary">
-        <span className="truncate flex-1">{path || '~/.slark/agents/' + agent.id + '/'}</span>
-        <button
-          onClick={() => void load()}
-          className="w-6 h-6 border-2 border-black rounded hover:bg-accent-yellow flex items-center justify-center"
-          title="Refresh"
-        >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path d="M23 4v6h-6M1 20v-6h6" />
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-          </svg>
-        </button>
-      </div>
-      <div className="section-header">WORKSPACE</div>
-      {error ? (
-        <div className="text-accent-red font-mono text-sm">⚠ {error}</div>
-      ) : tree.length === 0 ? (
-        <div className="text-text-secondary font-mono text-sm">
-          (empty) — files created by {agent.name} will appear here
-        </div>
-      ) : (
-        <ul className="space-y-1">
-          {tree.map((n, i) => (
-            <li key={i} className="flex items-center gap-2 font-mono text-sm">
-              <span>{n.type === 'dir' ? '📁' : '📄'}</span>
-              <span>{n.name}</span>
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }
@@ -501,13 +444,6 @@ function ProfileIcon() {
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
       <circle cx="12" cy="7" r="4" />
-    </svg>
-  );
-}
-function FolderIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
     </svg>
   );
 }
