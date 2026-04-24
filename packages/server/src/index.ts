@@ -20,6 +20,7 @@ import { agentRoutes } from './routes/agents.js';
 import { taskRoutes } from './routes/tasks.js';
 import { runtimesRoutes } from './routes/runtimes.js';
 import { extraRoutes } from './routes/extras.js';
+import { projectRoutes } from './routes/projects.js';
 import { registerWSRoute } from './ws/handler.js';
 import { hub } from './ws/hub.js';
 import { concurrencyQueue } from './agents/queue.js';
@@ -39,7 +40,10 @@ async function main() {
   // 初始化数据库 + seed
   const db = getDb();
   app.log.info(`✓ Database initialized at ${config.slarkHome}/slark.db`);
-  await runSeed(db, { info: (m) => app.log.info(m) });
+  await runSeed(db, {
+    info: (m) => app.log.info(m),
+    warn: (m) => app.log.warn(m),
+  });
 
   // REST
   app.get('/api/health', async () => ({
@@ -55,6 +59,7 @@ async function main() {
   }));
 
   await runtimesRoutes(app);
+  await projectRoutes(app, db);
   await channelRoutes(app, db);
   await agentRoutes(app, db);
   await taskRoutes(app, db);

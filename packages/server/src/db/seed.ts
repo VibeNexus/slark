@@ -1,63 +1,44 @@
 /**
- * 首次启动 seed 数据（D-9）
+ * Seed 数据（v1.0.1 修订，对齐 product-brief §D-3 + technical-decisions D-9）
  *
- * 规则：
- *   - 如果 channels 表空 → 创建 #general 频道
- *   - 如果 agents 表空且检测到 cursor-agent → 创建 Assistant Agent
- *     - 自动加入 #general
- *     - 自动创建 ~/.slark/agents/{id}/ 工作目录
+ * 策略（Sprint 1 Checkpoint 2）：
+ *   - 全新 db（projects / channels / agents 全空）→ 不预置任何东西，Welcome 页引导 Create Project
+ *   - v0 遗留 db（有 channels / agents）→ 保持原状，不做自动迁移
+ *
+ * 历史行为（v0，已废弃）：预置 #general 频道 + 检测到 cursor-agent 时创建 Assistant Agent
  */
 
-import { mkdirSync } from 'node:fs';
 import type { Database } from 'better-sqlite3';
-import { detectRuntime } from '../runtime-detect.js';
-import { agentWorkspacePath } from '../config.js';
-import { agentRepo, channelRepo } from './repos.js';
+import { agentRepo, channelRepo, projectRepo } from './repos.js';
 
-export async function runSeed(db: Database, logger?: { info: (msg: string) => void }): Promise<void> {
+export async function runSeed(
+  db: Database,
+  logger?: { info: (msg: string) => void; warn: (msg: string) => void },
+): Promise<void> {
   const log = (msg: string) => logger?.info?.(msg) ?? console.log(msg);
 
-  // 1. #general 频道
-  const channels = channelRepo.list(db);
-  let general = channels.find((c) => c.name === 'general');
-  if (!general) {
-    general = channelRepo.create(db, {
-      id: 'general',
-      name: 'general',
-      description: 'General channel',
-      type: 'channel',
-    });
-    log('[seed] created #general channel');
-  }
+  const projectCount = projectRepo.list(db).length;
+  const channelCount = channelRepo.list(db).length;
+  const agentCount = agentRepo.list(db).length;
 
-  // 2. 默认 Assistant Agent（仅当 cursor-agent 已安装且当前没有任何 agent）
-  const existingAgents = agentRepo.list(db);
-  if (existingAgents.length > 0) {
-    log(`[seed] skipping default agent (${existingAgents.length} agents already exist)`);
+  if (projectCount === 0 && channelCount === 0 && agentCount === 0) {
+    // 全新 db：v1.0.1 明确不预置，由 Welcome 页引导用户 Create Project
+    log('[seed] fresh db — no auto-seeded data; user will Create Project from the welcome page');
     return;
   }
 
-  const cursor = await detectRuntime('cursor');
-  if (!cursor.installed) {
-    log('[seed] cursor-agent not installed, skipping default agent');
+  if (projectCount > 0) {
+    // v1.0 以后的正常运行：用户已经有 Project
+    log(
+      `[seed] existing v1.0 db (${projectCount} project${projectCount === 1 ? '' : 's'}, ${channelCount} channel${channelCount === 1 ? '' : 's'}, ${agentCount} agent${agentCount === 1 ? '' : 's'})`,
+    );
     return;
   }
 
-  const assistant = agentRepo.create(db, {
-    name: 'Assistant',
-    avatar: null,
-    description: '通用 AI 助手。可以回答问题、写代码、执行命令。',
-    runtime: 'cursor',
-    model: 'composer-2-fast',
-    reasoning: 'medium',
-  });
-  agentRepo.addToChannel(db, general.id, assistant.id);
-
-  try {
-    mkdirSync(agentWorkspacePath(assistant.id), { recursive: true });
-  } catch (e) {
-    log(`[seed] warning: failed to create workspace dir: ${(e as Error).message}`);
-  }
-
-  log(`[seed] created default Assistant agent (runtime=cursor, model=composer-2-fast)`);
+  // v0 遗留 db：有 channels / agents 但无 projects
+  // 不自动迁移（Q-12 决议：忽略历史数据，必要时用户手动 rm ~/.slark/slark.db）
+  logger?.warn?.(
+    `[seed] v0 legacy data detected (${channelCount} channels / ${agentCount} agents, 0 projects). ` +
+      'Consider deleting ~/.slark/slark.db to restart fresh under v1.0 (Q-12 / N-14).',
+  );
 }

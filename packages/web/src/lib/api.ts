@@ -7,6 +7,7 @@ import type {
   AgentActivity,
   ChatMessage,
   Channel,
+  Project,
   RuntimeDetection,
   Task,
   TaskStatus,
@@ -44,6 +45,32 @@ export const getHealth = () => request<Health>('/api/health');
 export const getRuntimes = () => request<RuntimeDetection[]>('/api/runtimes');
 export const getRuntimeModels = (id: Runtime) =>
   request<{ models: string[]; note?: string; error?: string }>(`/api/runtimes/${id}/models`);
+
+// Projects (v1.0 新增)
+export const listProjects = () => request<Project[]>('/api/projects');
+export const getProject = (id: string) => request<Project>(`/api/projects/${id}`);
+export const getProjectByName = (name: string) =>
+  request<Project>(`/api/projects/by-name/${encodeURIComponent(name)}`);
+export const createProject = (data: {
+  id?: string;
+  name: string;
+  display_name?: string | null;
+  workspace_path: string;
+  goal: string;
+  team_rules?: string | null;
+  color?: string | null;
+}) =>
+  request<Project>('/api/projects', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+export const updateProject = (id: string, patch: Partial<Project>) =>
+  request<Project>(`/api/projects/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+export const deleteProject = (id: string) =>
+  request<void>(`/api/projects/${id}`, { method: 'DELETE' });
 
 // Channels
 export const listChannels = () => request<Channel[]>('/api/channels');
