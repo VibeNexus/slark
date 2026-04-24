@@ -8,9 +8,11 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onCreated: (c: Channel) => void;
+  /** v1.0: 新 channel 归属的 Project（从 Layout 当前 Project 注入） */
+  projectId?: string | null;
 }
 
-export function CreateChannelDialog({ open, onClose, onCreated }: Props) {
+export function CreateChannelDialog({ open, onClose, onCreated, projectId }: Props) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [busy, setBusy] = useState(false);
@@ -31,6 +33,7 @@ export function CreateChannelDialog({ open, onClose, onCreated }: Props) {
         name: n,
         description: description.trim() || undefined,
         type: 'channel',
+        project_id: projectId ?? undefined,
       });
       onCreated(ch);
       setName('');

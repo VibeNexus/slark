@@ -20,9 +20,11 @@ interface Props {
   onClose: () => void;
   /** 创建后自动加入此频道 */
   autoJoinChannelId?: string;
+  /** v1.0: 新 Agent 归属的 Project（从 Layout 当前 Project 注入） */
+  projectId?: string | null;
 }
 
-export function CreateAgentDialog({ open, onClose, autoJoinChannelId }: Props) {
+export function CreateAgentDialog({ open, onClose, autoJoinChannelId, projectId }: Props) {
   const [runtimes, setRuntimes] = useState<RuntimeDetection[]>([]);
   const [models, setModels] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
@@ -104,6 +106,7 @@ export function CreateAgentDialog({ open, onClose, autoJoinChannelId }: Props) {
         model: model || undefined,
         reasoning,
         env_vars: Object.keys(envVarsObj).length > 0 ? envVarsObj : undefined,
+        project_id: projectId ?? undefined,
       });
       upsertAgent(agent);
       if (autoJoinChannelId) {

@@ -8,8 +8,9 @@
  *   - Search / Threads / Tasks / Saved 项展示但未实装（click = no-op）
  */
 
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, useSearchParams, useNavigate } from 'react-router-dom';
-import type { Agent, Channel } from '@slark/shared';
+import type { Agent, Channel, Project } from '@slark/shared';
 import { cn } from '../lib/cn';
 import { Avatar } from './Avatar';
 import { StatusDot } from './StatusDot';
@@ -17,6 +18,10 @@ import { StatusDot } from './StatusDot';
 interface Props {
   channels: Channel[];
   agents: Agent[];
+  projects: Project[];
+  currentProject: Project | null;
+  onSelectProject: (id: string | null) => void;
+  onCreateProject?: () => void;
   currentChannelId?: string;
   currentDmAgentId?: string;
   onCreateChannel?: () => void;
@@ -27,6 +32,10 @@ interface Props {
 export function Sidebar({
   channels,
   agents,
+  projects,
+  currentProject,
+  onSelectProject,
+  onCreateProject,
   currentChannelId,
   currentDmAgentId,
   onCreateChannel,
@@ -45,12 +54,14 @@ export function Sidebar({
 
   return (
     <aside className="w-64 bg-bg-sidebar border-r-2 border-black flex flex-col h-full">
-      {/* Server 名称（静态） */}
-      <div className="px-3 pt-3 pb-2">
-        <div className="px-2 py-1.5 bg-black text-accent-yellow font-bold rounded flex items-center gap-1 border-2 border-black">
-          <span>Slark</span>
-        </div>
-      </div>
+      {/* Project 切换器（v1.0 CP5b，替换原静态 "Slark" 标签，对齐原版 KaisTeam ▼） */}
+      <ProjectSwitcher
+        projects={projects}
+        currentProject={currentProject}
+        onSelect={onSelectProject}
+        onCreate={onCreateProject}
+      />
+
 
       {/* Tab 切换 */}
       <div className="flex border-y-2 border-black">
@@ -341,6 +352,93 @@ function ToolLink({
       <span className="flex-shrink-0">{icon}</span>
       <span className="flex-1 truncate">{label}</span>
     </NavLink>
+  );
+}
+
+// ---------- Project Switcher (v1.0 CP5b) ----------
+function ProjectSwitcher({
+  projects,
+  currentProject,
+  onSelect,
+  onCreate,
+}: {
+  projects: Project[];
+  currentProject: Project | null;
+  onSelect: (id: string | null) => void;
+  onCreate?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener('mousedown', onDoc);
+    return () => window.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const label = currentProject?.display_name ?? currentProject?.name ?? 'Slark';
+
+  return (
+    <div className="relative px-3 pt-3 pb-2" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full px-2 py-1.5 bg-black text-accent-yellow font-bold rounded flex items-center justify-between gap-1 border-2 border-black hover:brightness-110"
+        title={currentProject?.workspace_path ?? 'No project selected'}
+      >
+        <span className="truncate">{label}</span>
+        <span className="text-[10px]">▼</span>
+      </button>
+
+      {open && (
+        <div className="absolute left-3 right-3 mt-1 z-40 bg-bg-card border-2 border-black rounded shadow-[4px_4px_0_0_#000]">
+          <div className="max-h-64 overflow-y-auto">
+            {projects.length === 0 && (
+              <div className="px-3 py-2 text-[12px] text-text-secondary font-mono">
+                No projects yet
+              </div>
+            )}
+            {projects.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => {
+                  onSelect(p.id);
+                  setOpen(false);
+                }}
+                className={cn(
+                  'w-full text-left px-3 py-2 text-sm hover:bg-accent-yellow flex items-center justify-between gap-2',
+                  currentProject?.id === p.id ? 'bg-accent-pink font-bold' : '',
+                )}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium">{p.display_name ?? p.name}</div>
+                  <div className="text-[10px] font-mono text-text-secondary truncate">
+                    {p.workspace_path}
+                  </div>
+                </div>
+                {currentProject?.id === p.id && <span>✓</span>}
+              </button>
+            ))}
+          </div>
+          {onCreate && (
+            <button
+              type="button"
+              onClick={() => {
+                onCreate();
+                setOpen(false);
+              }}
+              className="w-full text-left px-3 py-2 text-sm border-t-2 border-black bg-accent-pink font-bold hover:brightness-105"
+            >
+              + New Project
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

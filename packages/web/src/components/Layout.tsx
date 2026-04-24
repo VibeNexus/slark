@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMatch } from 'react-router-dom';
 import { useChannelsStore } from '../stores/channels';
 import { useAgentsStore } from '../stores/agents';
+import { useProjectsStore } from '../stores/projects';
 import { Sidebar } from './Sidebar';
 import { CreateAgentDialog } from './CreateAgentDialog';
 import { CreateChannelDialog } from './CreateChannelDialog';
+import { CreateProjectDialog } from './CreateProjectDialog';
 import { SearchDialog } from './SearchDialog';
 
 interface Props {
@@ -14,9 +16,14 @@ interface Props {
 export function Layout({ children }: Props) {
   const channels = useChannelsStore((s) => s.channels);
   const agents = useAgentsStore((s) => s.agents);
+  const projects = useProjectsStore((s) => s.projects);
+  const currentProjectId = useProjectsStore((s) => s.currentProjectId);
+  const setCurrentProject = useProjectsStore((s) => s.setCurrent);
   const upsertChannel = useChannelsStore((s) => s.upsert);
+
   const [createAgentOpen, setCreateAgentOpen] = useState(false);
   const [createChannelOpen, setCreateChannelOpen] = useState(false);
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
 
   // 全局快捷键：⌘/Ctrl+K 打开搜索
@@ -37,11 +44,34 @@ export function Layout({ children }: Props) {
 
   const autoJoinChannelId = channelMatch?.params.channelId;
 
+  // v1.0 CP5b：按当前 Project 过滤 channels / agents
+  // currentProjectId 为 null 时显示所有（兼容 v0 遗留数据 / 无 Project 首次启动）
+  const currentProject =
+    projects.find((p) => p.id === currentProjectId) ?? null;
+
+  const visibleChannels = useMemo(() => {
+    if (!currentProject) return channels;
+    return channels.filter(
+      (c) => !c.project_id || c.project_id === currentProject.id,
+    );
+  }, [channels, currentProject]);
+
+  const visibleAgents = useMemo(() => {
+    if (!currentProject) return agents;
+    return agents.filter(
+      (a) => !a.project_id || a.project_id === currentProject.id,
+    );
+  }, [agents, currentProject]);
+
   return (
     <div className="h-full flex">
       <Sidebar
-        channels={channels}
-        agents={agents}
+        channels={visibleChannels}
+        agents={visibleAgents}
+        projects={projects}
+        currentProject={currentProject}
+        onSelectProject={setCurrentProject}
+        onCreateProject={() => setCreateProjectOpen(true)}
         currentChannelId={channelMatch?.params.channelId}
         currentDmAgentId={dmMatch?.params.agentId}
         onCreateAgent={() => setCreateAgentOpen(true)}
@@ -55,11 +85,17 @@ export function Layout({ children }: Props) {
         open={createAgentOpen}
         onClose={() => setCreateAgentOpen(false)}
         autoJoinChannelId={autoJoinChannelId}
+        projectId={currentProject?.id}
       />
       <CreateChannelDialog
         open={createChannelOpen}
         onClose={() => setCreateChannelOpen(false)}
         onCreated={(c) => upsertChannel(c)}
+        projectId={currentProject?.id}
+      />
+      <CreateProjectDialog
+        open={createProjectOpen}
+        onClose={() => setCreateProjectOpen(false)}
       />
       <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
