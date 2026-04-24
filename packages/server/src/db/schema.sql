@@ -103,3 +103,41 @@ CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- =============================================================================
+-- 9. projects (v1.0 引入，对齐 docs/product-brief.md §D-2 / docs/technical-decisions.md D-13)
+--
+-- 用户视角："Project 是一等公民"，对应原版 slock.ai 的 Server。
+-- workspace_path / goal 都是 NOT NULL，见 D-13 / D-14。
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS projects (
+  id              TEXT PRIMARY KEY,
+  name            TEXT NOT NULL UNIQUE,
+  display_name    TEXT,
+  workspace_path  TEXT NOT NULL,
+  goal            TEXT NOT NULL,
+  team_rules      TEXT,
+  color           TEXT,
+  created_at      INTEGER NOT NULL
+);
+
+-- =============================================================================
+-- 10. agent_runs (v1.0 引入，对齐 docs/technical-decisions.md D-1 / D-18)
+--
+-- 替代 v0 的 agents.status 单值字段：Agent 在每个 channel 的状态独立派生。
+-- 活跃运行：ended_at IS NULL；结束运行：ended_at = timestamp。
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id    TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  channel_id  TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  status      TEXT NOT NULL CHECK(status IN ('thinking','working','error','stopped')),
+  started_at  INTEGER NOT NULL,
+  ended_at    INTEGER,
+  error_msg   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_active
+  ON agent_runs(agent_id, channel_id)
+  WHERE ended_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_agent_runs_by_channel
+  ON agent_runs(channel_id, started_at DESC);

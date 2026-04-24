@@ -1,8 +1,8 @@
 /**
- * 前后端共享的实体类型。数据库行按 PLAN.md MVP-2 schema，这里是 TypeScript 镜像。
+ * 前后端共享的实体类型。数据库行按 `packages/server/src/db/schema.sql`，这里是 TypeScript 镜像。
  *
  * 约定：
- *   - id 字段用 string（UUID v4）或 number（tasks 自增）
+ *   - id 字段用 string（UUID / slug / nanoid）或 number（tasks / activity / agent_runs 自增）
  *   - 时间戳统一 number（unix ms）
  *   - JSON 字段在 DB 层是 TEXT，在这里反序列化为对应类型
  */
@@ -16,6 +16,24 @@ import type {
 } from './constants.js';
 
 // =============================================================================
+// Project (v1.0 新增，对齐 docs/product-brief.md §D-2 / technical-decisions D-13)
+// =============================================================================
+export interface Project {
+  id: string;
+  /** URL slug, 小写 / 数字 / - _，唯一 */
+  name: string;
+  display_name: string | null;
+  /** 代码仓库绝对路径，必填（D-8 废除沙盒后无兜底） */
+  workspace_path: string;
+  /** 项目目标，必填，最长 GOAL_MAX_LENGTH 字符（D-14）*/
+  goal: string;
+  /** 可选团队协作规则，ContextBuilder 将注入到 prompt 顶部 */
+  team_rules: string | null;
+  color: string | null;
+  created_at: number;
+}
+
+// =============================================================================
 // Channel
 // =============================================================================
 export interface Channel {
@@ -23,6 +41,11 @@ export interface Channel {
   name: string;
   description: string | null;
   type: 'channel' | 'dm';
+  /**
+   * v1.0 新增：归属 Project（D-2）。
+   * v1.0.1 过渡期：旧 db 行可能为 null，Sprint 1 Checkpoint 2 将强制 NOT NULL。
+   */
+  project_id?: string | null;
   created_at: number;
 }
 
@@ -38,8 +61,31 @@ export interface Agent {
   model: string | null;
   reasoning: ReasoningEffort | null;
   env_vars: Record<string, string>;
+  /**
+   * v0 遗留单值字段。v1.0 已定 per-channel 派生（D-1 修订），CP3 将移除。
+   * 在 v1.0.1 过渡期仍有 status 字段以保持前端兼容。
+   */
   status: AgentStatus;
+  /**
+   * v1.0 新增：归属 Project（D-13）。CP2 之后会强制 NOT NULL。
+   */
+  project_id?: string | null;
   created_at: number;
+}
+
+// =============================================================================
+// Agent Run (v1.0 新增，对齐 D-1 / D-18)
+// =============================================================================
+export type AgentRunStatus = 'thinking' | 'working' | 'error' | 'stopped';
+
+export interface AgentRun {
+  id: number;
+  agent_id: string;
+  channel_id: string;
+  status: AgentRunStatus;
+  started_at: number;
+  ended_at: number | null;
+  error_msg: string | null;
 }
 
 // =============================================================================

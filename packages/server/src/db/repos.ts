@@ -13,10 +13,13 @@ import { nanoid } from 'nanoid';
 import type {
   Agent,
   AgentActivity,
+  AgentRun,
+  AgentRunStatus,
   ActivityType,
   Channel,
   ChatMessage,
   MessageMetadata,
+  Project,
   Task,
 } from '@slark/shared';
 import type {
@@ -29,6 +32,127 @@ import type {
 import { ACTIVITY_RETENTION_PER_AGENT } from '@slark/shared';
 
 const now = (): number => Date.now();
+
+// =============================================================================
+// Projects (v1.0)
+// =============================================================================
+
+interface ProjectRow {
+  id: string;
+  name: string;
+  display_name: string | null;
+  workspace_path: string;
+  goal: string;
+  team_rules: string | null;
+  color: string | null;
+  created_at: number;
+}
+
+function rowToProject(r: ProjectRow): Project {
+  return { ...r };
+}
+
+export const projectRepo = {
+  list(db: Database): Project[] {
+    return (
+      db.prepare('SELECT * FROM projects ORDER BY created_at ASC').all() as ProjectRow[]
+    ).map(rowToProject);
+  },
+
+  getById(db: Database, id: string): Project | null {
+    const row = db
+      .prepare('SELECT * FROM projects WHERE id = ?')
+      .get(id) as ProjectRow | undefined;
+    return row ? rowToProject(row) : null;
+  },
+
+  getByName(db: Database, name: string): Project | null {
+    const row = db
+      .prepare('SELECT * FROM projects WHERE name = ?')
+      .get(name) as ProjectRow | undefined;
+    return row ? rowToProject(row) : null;
+  },
+
+  create(
+    db: Database,
+    input: {
+      id?: string;
+      name: string;
+      display_name?: string | null;
+      workspace_path: string;
+      goal: string;
+      team_rules?: string | null;
+      color?: string | null;
+    },
+  ): Project {
+    const id = input.id ?? nanoid();
+    const ts = now();
+    db.prepare(
+      `INSERT INTO projects (id, name, display_name, workspace_path, goal, team_rules, color, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      input.name,
+      input.display_name ?? null,
+      input.workspace_path,
+      input.goal,
+      input.team_rules ?? null,
+      input.color ?? null,
+      ts,
+    );
+    return {
+      id,
+      name: input.name,
+      display_name: input.display_name ?? null,
+      workspace_path: input.workspace_path,
+      goal: input.goal,
+      team_rules: input.team_rules ?? null,
+      color: input.color ?? null,
+      created_at: ts,
+    };
+  },
+
+  update(
+    db: Database,
+    id: string,
+    patch: Partial<Omit<Project, 'id' | 'created_at'>>,
+  ): Project | null {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    if (patch.name !== undefined) {
+      fields.push('name = ?');
+      values.push(patch.name);
+    }
+    if (patch.display_name !== undefined) {
+      fields.push('display_name = ?');
+      values.push(patch.display_name);
+    }
+    if (patch.workspace_path !== undefined) {
+      fields.push('workspace_path = ?');
+      values.push(patch.workspace_path);
+    }
+    if (patch.goal !== undefined) {
+      fields.push('goal = ?');
+      values.push(patch.goal);
+    }
+    if (patch.team_rules !== undefined) {
+      fields.push('team_rules = ?');
+      values.push(patch.team_rules);
+    }
+    if (patch.color !== undefined) {
+      fields.push('color = ?');
+      values.push(patch.color);
+    }
+    if (!fields.length) return this.getById(db, id);
+    values.push(id);
+    db.prepare(`UPDATE projects SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    return this.getById(db, id);
+  },
+
+  remove(db: Database, id: string): void {
+    db.prepare('DELETE FROM projects WHERE id = ?').run(id);
+  },
+};
 
 // =============================================================================
 // Channels
@@ -610,5 +734,110 @@ export const activityRepo = {
       detail: input.detail ?? null,
       created_at: ts,
     };
+  },
+};
+
+// =============================================================================
+// Agent Runs (v1.0 新增，对齐 D-1 / D-18)
+//
+// 替代 v0 的 agents.status 单值字段。每次 spawn 开一个 run，结束时更新 ended_at。
+// 查询 Agent 在指定 channel 的当前状态：
+//   SELECT status FROM agent_runs WHERE agent_id=? AND channel_id=? AND ended_at IS NULL
+//   ORDER BY started_at DESC LIMIT 1
+// =============================================================================
+
+interface AgentRunRow {
+  id: number;
+  agent_id: string;
+  channel_id: string;
+  status: string;
+  started_at: number;
+  ended_at: number | null;
+  error_msg: string | null;
+}
+
+function rowToAgentRun(r: AgentRunRow): AgentRun {
+  return {
+    id: r.id,
+    agent_id: r.agent_id,
+    channel_id: r.channel_id,
+    status: r.status as AgentRunStatus,
+    started_at: r.started_at,
+    ended_at: r.ended_at,
+    error_msg: r.error_msg,
+  };
+}
+
+export const agentRunRepo = {
+  /** 开启一个 run，返回 id */
+  start(
+    db: Database,
+    input: { agent_id: string; channel_id: string; status: AgentRunStatus },
+  ): AgentRun {
+    const ts = now();
+    const result = db
+      .prepare(
+        `INSERT INTO agent_runs (agent_id, channel_id, status, started_at, ended_at, error_msg)
+         VALUES (?, ?, ?, ?, NULL, NULL)`,
+      )
+      .run(input.agent_id, input.channel_id, input.status, ts);
+    return {
+      id: Number(result.lastInsertRowid),
+      agent_id: input.agent_id,
+      channel_id: input.channel_id,
+      status: input.status,
+      started_at: ts,
+      ended_at: null,
+      error_msg: null,
+    };
+  },
+
+  /** 更新活跃 run 的 status（如 thinking → working） */
+  updateStatus(db: Database, id: number, status: AgentRunStatus): void {
+    db.prepare('UPDATE agent_runs SET status = ? WHERE id = ?').run(status, id);
+  },
+
+  /** 结束一个 run（设置 ended_at） */
+  end(db: Database, id: number, errorMsg?: string | null): void {
+    const ts = now();
+    db.prepare(
+      'UPDATE agent_runs SET ended_at = ?, error_msg = ? WHERE id = ?',
+    ).run(ts, errorMsg ?? null, id);
+  },
+
+  /** 查找 Agent 在指定 channel 的当前活跃 run（若有） */
+  getActive(db: Database, agentId: string, channelId: string): AgentRun | null {
+    const row = db
+      .prepare(
+        `SELECT * FROM agent_runs
+         WHERE agent_id = ? AND channel_id = ? AND ended_at IS NULL
+         ORDER BY started_at DESC LIMIT 1`,
+      )
+      .get(agentId, channelId) as AgentRunRow | undefined;
+    return row ? rowToAgentRun(row) : null;
+  },
+
+  /** 列出 Agent 所有活跃 run（跨 channel）—— Sidebar 判断"任意 channel 在跑"用 */
+  listActiveForAgent(db: Database, agentId: string): AgentRun[] {
+    const rows = db
+      .prepare(
+        `SELECT * FROM agent_runs
+         WHERE agent_id = ? AND ended_at IS NULL
+         ORDER BY started_at DESC`,
+      )
+      .all(agentId) as AgentRunRow[];
+    return rows.map(rowToAgentRun);
+  },
+
+  /** 列出 Channel 所有活跃 run（Stop All 用） */
+  listActiveInChannel(db: Database, channelId: string): AgentRun[] {
+    const rows = db
+      .prepare(
+        `SELECT * FROM agent_runs
+         WHERE channel_id = ? AND ended_at IS NULL
+         ORDER BY started_at DESC`,
+      )
+      .all(channelId) as AgentRunRow[];
+    return rows.map(rowToAgentRun);
   },
 };
