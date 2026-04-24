@@ -106,9 +106,13 @@ slark/
 | 文档 | 用途 |
 |------|------|
 | [PLAN.md](PLAN.md) | 项目总览 + 4 阶段实施路线 + 每阶段验收清单 |
+| [docs/product-brief.md](docs/product-brief.md) | 战略层：产品定位 / 目标用户 / 核心决策 / 非目标 |
 | [docs/technical-decisions.md](docs/technical-decisions.md) | 状态机、Token 预算、并发、错误 UI 等默认决策 |
+| [docs/optimization-backlog.md](docs/optimization-backlog.md) | 已决定要做、尚未排期的优化清单（O-N 条目 + 废弃决策） |
 | [docs/ui-reference/README.md](docs/ui-reference/README.md) | UI 视觉基准（17 张真实截图 + 4 份规范） |
 | [docs/cli-event-format.md](docs/cli-event-format.md) | 三个 CLI 的事件格式对照 |
+| [docs/clawteam-comparison.md](docs/clawteam-comparison.md) | 调研：[HKUDS/ClawTeam](https://github.com/HKUDS/ClawTeam) 对比与借鉴条目 |
+| [docs/research/routa-analysis.md](docs/research/routa-analysis.md) | 调研：[phodal/routa](https://github.com/phodal/routa) 项目分析与可借鉴点 |
 | [spike/README.md](spike/README.md) | Phase 0 CLI 验证结果总结 |
 
 ## 🧪 已完成路线
