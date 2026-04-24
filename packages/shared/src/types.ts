@@ -185,6 +185,11 @@ export type ActivityType = 'thinking' | 'working' | 'output' | 'error' | 'idle';
 export interface AgentActivity {
   id: number;
   agent_id: string;
+  /**
+   * v1.0 新增：活动发生在哪个 channel（K-3 修正）。
+   * v0 遗留 activity 行为 null。
+   */
+  channel_id: string | null;
   type: ActivityType;
   detail: string | null;
   created_at: number;

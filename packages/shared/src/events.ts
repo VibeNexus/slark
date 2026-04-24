@@ -35,7 +35,17 @@ export type ServerEvent =
       final_content: string;
       metadata: MessageMetadata;
     }
-  | { type: 'agent_status'; agent_id: string; status: AgentStatus; detail?: string }
+  | {
+      type: 'agent_status';
+      agent_id: string;
+      status: AgentStatus;
+      /**
+       * v1.0 新增：Agent 状态发生在哪个 channel（D-1 / D-18 per-channel 派生）。
+       * 兼容 v0 前端：可选字段，旧前端直接忽略；新前端按 channel 分派显示。
+       */
+      channel_id?: string;
+      detail?: string;
+    }
   | { type: 'system_event'; event: SystemEvent }
   | { type: 'task_update'; task: Task }
   | { type: 'subscribed'; channel_id: string }

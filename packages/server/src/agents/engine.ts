@@ -20,7 +20,7 @@ import { mkdirSync } from 'node:fs';
 import type { Database } from 'better-sqlite3';
 import type { AgentStatus, ChatMessage, MessageMetadata, Runtime } from '@slark/shared';
 import { LOCAL_USER_ID } from '@slark/shared';
-import { agentRepo, channelRepo, messageRepo } from '../db/repos.js';
+import { agentRepo, agentRunRepo, channelRepo, messageRepo, projectRepo } from '../db/repos.js';
 import { agentWorkspacePath } from '../config.js';
 import { hub } from '../ws/hub.js';
 import { buildContext } from './context-builder.js';
@@ -159,19 +159,20 @@ export async function triggerAgent(
 
   hub.broadcast(ctx.channelId, { type: 'message', message: placeholder });
 
-  // 3. 状态 → thinking
+  // 3. 启动 agent_run（v1.0 per-channel status 派生，D-1 / D-18）
+  //    同步写入 agents.status（v0 前端兼容，CP5 移除）
+  const run = agentRunRepo.start(db, {
+    agent_id: agent.id,
+    channel_id: ctx.channelId,
+    status: 'thinking',
+  });
   updateAgentStatus(db, agent.id, 'thinking', ctx.channelId);
 
-  // 4. 确保 workspace 目录存在
-  const workspace = agentWorkspacePath(agent.id);
-  try {
-    mkdirSync(workspace, { recursive: true });
-  } catch (e) {
-    log.warn(`failed to ensure workspace: ${(e as Error).message}`);
-  }
+  // 4. cwd 解析（D-8 v1.0 修订）：优先 project.workspace_path，老数据回退沙盒
+  const cwd = resolveCwd(db, channel?.project_id ?? null, agent.id, log);
 
   // 5. 并发队列 + spawn
-  const activity = new ActivityRecorder(db, agent.id);
+  const activity = new ActivityRecorder(db, agent.id, ctx.channelId);
   activity.spawnStart(
     `Spawning ${agent.runtime}${agent.model ? ` with model=${agent.model}` : ''}`,
   );
@@ -186,7 +187,7 @@ export async function triggerAgent(
         prompt: built.prompt,
         model: agent.model,
         reasoning: agent.reasoning,
-        workingDirectory: workspace,
+        workingDirectory: cwd,
         envVars: agent.env_vars,
         permissive: true,
       }),
@@ -202,6 +203,7 @@ export async function triggerAgent(
               event.type === 'tool.started')
           ) {
             hasSwitchedToWorking = true;
+            agentRunRepo.updateStatus(db, run.id, 'working');
             updateAgentStatus(db, agent.id, 'working', ctx.channelId);
           }
 
@@ -232,6 +234,7 @@ export async function triggerAgent(
 
   // 6. 队列满
   if (!runResult.ok) {
+    agentRunRepo.end(db, run.id, 'queue_full');
     updateAgentStatus(db, agent.id, 'error', ctx.channelId);
     const errMsg = 'Too many concurrent requests. Please try again later.';
     finalizeError(db, placeholder, errMsg);
@@ -284,13 +287,15 @@ export async function triggerAgent(
     metadata: finalMetadata,
   });
 
-  // 8. 最终状态
+  // 8. 最终状态（v1.0: agent_runs end + v0 agents.status 双写）
   if (finalOk) {
+    agentRunRepo.end(db, run.id);
     updateAgentStatus(db, agent.id, 'idle', ctx.channelId);
   } else {
-    updateAgentStatus(db, agent.id, 'error', ctx.channelId);
     const errEvent = result.events.find((e) => e.type === 'error');
     const errMsg = errEvent && 'message' in errEvent ? errEvent.message : 'Unknown error';
+    agentRunRepo.end(db, run.id, errMsg);
+    updateAgentStatus(db, agent.id, 'error', ctx.channelId);
     emitSystemError(db, ctx.channelId, agent.name, errMsg);
   }
 
@@ -318,7 +323,42 @@ function updateAgentStatus(
   channelId: string,
 ): void {
   agentRepo.updateStatus(db, agentId, status);
-  hub.broadcast(channelId, { type: 'agent_status', agent_id: agentId, status });
+  // v1.0: agent_status 事件携带 channel_id，前端可派生 per-channel 显示（D-1 / D-18）
+  hub.broadcast(channelId, {
+    type: 'agent_status',
+    agent_id: agentId,
+    status,
+    channel_id: channelId,
+  });
+}
+
+/**
+ * 解析 Agent spawn 的工作目录（D-8 v1.0 修订）：
+ *   - 若 channel 绑定 Project 且 Project 有 workspace_path → 使用之
+ *   - 否则（纯 v0 数据路径）回退到 ~/.slark/agents/{id}/ 老沙盒 + 创建目录
+ *
+ * v1.0 最终目标是彻底移除回退分支（Sprint 1 CP5 随 Create Project 流程完成强制绑定）。
+ */
+function resolveCwd(
+  db: Database,
+  projectId: string | null,
+  agentId: string,
+  log: { warn: (msg: string) => void },
+): string {
+  if (projectId) {
+    const project = projectRepo.getById(db, projectId);
+    if (project?.workspace_path) {
+      return project.workspace_path;
+    }
+  }
+  // 回退：v0 沙盒路径，保证 v0 数据继续可用
+  const fallback = agentWorkspacePath(agentId);
+  try {
+    mkdirSync(fallback, { recursive: true });
+  } catch (e) {
+    log.warn(`failed to ensure fallback workspace: ${(e as Error).message}`);
+  }
+  return fallback;
 }
 
 function emitSystemError(

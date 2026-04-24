@@ -10,6 +10,8 @@
  *   - error          → type=error
  *
  * 不记录：text.delta / thinking.delta（会爆炸）
+ *
+ * v1.0 修订（CP3 / K-3）：每次 append 带 channel_id，便于 Profile Activity Tab 按 channel 过滤。
  */
 
 import type { Database } from 'better-sqlite3';
@@ -22,11 +24,14 @@ export class ActivityRecorder {
   constructor(
     private db: Database,
     private agentId: string,
+    /** v1.0 新增：活动归属的 channel（K-3） */
+    private channelId: string | null = null,
   ) {}
 
   spawnStart(detail: string): void {
     activityRepo.append(this.db, {
       agent_id: this.agentId,
+      channel_id: this.channelId,
       type: 'thinking',
       detail,
     });
@@ -40,6 +45,7 @@ export class ActivityRecorder {
           this.hasEmittedWorking = true;
           activityRepo.append(this.db, {
             agent_id: this.agentId,
+            channel_id: this.channelId,
             type: 'working',
             detail: 'Started generating response',
           });
@@ -50,6 +56,7 @@ export class ActivityRecorder {
         this.hasEmittedWorking = true;
         activityRepo.append(this.db, {
           agent_id: this.agentId,
+          channel_id: this.channelId,
           type: 'working',
           detail: `${event.tool}: ${this.summarize(event.args)}`,
         });
@@ -58,6 +65,7 @@ export class ActivityRecorder {
       case 'tool.completed':
         activityRepo.append(this.db, {
           agent_id: this.agentId,
+          channel_id: this.channelId,
           type: 'output',
           detail: `${event.tool} ${event.success ? '✓' : '✗'} exit=${event.exit_code ?? '?'}`,
         });
@@ -66,6 +74,7 @@ export class ActivityRecorder {
       case 'session.completed':
         activityRepo.append(this.db, {
           agent_id: this.agentId,
+          channel_id: this.channelId,
           type: 'idle',
           detail: `Completed in ${event.duration_ms ?? '?'}ms`,
         });
@@ -74,6 +83,7 @@ export class ActivityRecorder {
       case 'error':
         activityRepo.append(this.db, {
           agent_id: this.agentId,
+          channel_id: this.channelId,
           type: 'error',
           detail: `${event.code ?? 'error'}: ${event.message}`,
         });

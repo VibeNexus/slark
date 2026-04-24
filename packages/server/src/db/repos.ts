@@ -672,6 +672,7 @@ export const taskRepo = {
 interface ActivityRow {
   id: number;
   agent_id: string;
+  channel_id: string | null;
   type: string;
   detail: string | null;
   created_at: number;
@@ -681,6 +682,7 @@ function rowToActivity(r: ActivityRow): AgentActivity {
   return {
     id: r.id,
     agent_id: r.agent_id,
+    channel_id: r.channel_id ?? null,
     type: r.type as ActivityType,
     detail: r.detail,
     created_at: r.created_at,
@@ -688,38 +690,58 @@ function rowToActivity(r: ActivityRow): AgentActivity {
 }
 
 export const activityRepo = {
-  list(db: Database, agentId: string, limit = 50, before?: number): AgentActivity[] {
-    const rows = before
-      ? (db
-          .prepare(
-            `SELECT * FROM agent_activity
-             WHERE agent_id = ? AND id < ?
-             ORDER BY id DESC LIMIT ?`,
-          )
-          .all(agentId, before, limit) as ActivityRow[])
-      : (db
-          .prepare(
-            `SELECT * FROM agent_activity
-             WHERE agent_id = ?
-             ORDER BY id DESC LIMIT ?`,
-          )
-          .all(agentId, limit) as ActivityRow[]);
+  list(
+    db: Database,
+    agentId: string,
+    limit = 50,
+    before?: number,
+    channelId?: string,
+  ): AgentActivity[] {
+    const where: string[] = ['agent_id = ?'];
+    const params: unknown[] = [agentId];
+    if (before !== undefined) {
+      where.push('id < ?');
+      params.push(before);
+    }
+    if (channelId) {
+      where.push('channel_id = ?');
+      params.push(channelId);
+    }
+    params.push(limit);
+    const rows = db
+      .prepare(
+        `SELECT * FROM agent_activity
+         WHERE ${where.join(' AND ')}
+         ORDER BY id DESC LIMIT ?`,
+      )
+      .all(...params) as ActivityRow[];
     return rows.map(rowToActivity);
   },
 
   append(
     db: Database,
-    input: { agent_id: string; type: ActivityType; detail?: string | null },
+    input: {
+      agent_id: string;
+      type: ActivityType;
+      detail?: string | null;
+      channel_id?: string | null;
+    },
   ): AgentActivity {
     const ts = now();
     const result = db
       .prepare(
-        'INSERT INTO agent_activity (agent_id, type, detail, created_at) VALUES (?, ?, ?, ?)',
+        'INSERT INTO agent_activity (agent_id, channel_id, type, detail, created_at) VALUES (?, ?, ?, ?, ?)',
       )
-      .run(input.agent_id, input.type, input.detail ?? null, ts);
+      .run(
+        input.agent_id,
+        input.channel_id ?? null,
+        input.type,
+        input.detail ?? null,
+        ts,
+      );
     const id = Number(result.lastInsertRowid);
 
-    // 保留策略（D-3）：超过 500 条删除最旧
+    // 保留策略（D-3）：超过 500 条删除最旧（全 channel 合并）
     db.prepare(
       `DELETE FROM agent_activity
        WHERE agent_id = ? AND id NOT IN (
@@ -730,6 +752,7 @@ export const activityRepo = {
     return {
       id,
       agent_id: input.agent_id,
+      channel_id: input.channel_id ?? null,
       type: input.type,
       detail: input.detail ?? null,
       created_at: ts,

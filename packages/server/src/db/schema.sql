@@ -78,14 +78,17 @@ CREATE INDEX IF NOT EXISTS idx_tasks_channel_status ON tasks(channel_id, status)
 -- =============================================================================
 -- 6. agent_activity
 -- =============================================================================
+-- v1.0 新增 channel_id 列（D-3 / K-3）；对旧 db 由 db/index.ts 的 migrate() 幂等补列
 CREATE TABLE IF NOT EXISTS agent_activity (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   agent_id    TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  channel_id  TEXT REFERENCES channels(id) ON DELETE CASCADE,
   type        TEXT NOT NULL CHECK(type IN ('thinking','working','output','error','idle')),
   detail      TEXT,
   created_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_activity_agent ON agent_activity(agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_agent_channel ON agent_activity(agent_id, channel_id, created_at DESC);
 
 -- =============================================================================
 -- 7. saved_messages（用户收藏）
