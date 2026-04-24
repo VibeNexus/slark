@@ -20,6 +20,7 @@
 | [`docs/technical-decisions.md`](docs/technical-decisions.md) | 实现 | 默认决策 / 常量 / 状态机 / error UI 等 | 编码时遇到不确定的常量、策略 |
 | [`docs/phase0-cli-spike.md`](docs/phase0-cli-spike.md) | 实现 | Phase 0 CLI 验证（已完成） | 回溯 CLI 行为 |
 | [`docs/cli-event-format.md`](docs/cli-event-format.md) | 实现 | Cursor/Codex/Claude 事件格式对照 | 写 CLI Adapter 时 |
+| [`docs/sprint1-milestone.md`](docs/sprint1-milestone.md) | 实现 | Sprint 1 交付清单 + 手动验收 runbook + 已知限制 | Sprint 1 完成后；Sprint 2 启动前 |
 | [`docs/ui-reference/README.md`](docs/ui-reference/README.md) | 视觉 | UI 基准总索引（17 张截图 + 4 份规范） | 做 UI 时 |
 | [`docs/ui-reference/design-tokens.md`](docs/ui-reference/design-tokens.md) | 视觉 | 色值/字体/间距/边框 | 配 Tailwind theme 时 |
 | [`docs/ui-reference/components.md`](docs/ui-reference/components.md) | 视觉 | 每个组件结构与状态 | 实现组件时 |

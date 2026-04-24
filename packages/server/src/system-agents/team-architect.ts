@@ -42,10 +42,16 @@ export async function suggestTeam(input: SuggestTeamInput): Promise<TeamSuggesti
   }
 
   // 2. spawn
+  //
+  // 注意：Team Architect **不传 workingDirectory** 到 cursor-agent。
+  // 原因：Create Project Step 1 时用户填的 workspace_path 可能还不存在
+  // （例如准备新建一个目录作为 Project 的代码仓库）；把它作为 cwd 会让
+  // spawn 立刻失败。Team Architect 只需要根据 goal + workspace_path 字符串
+  // 给出推荐，不需要实际读取项目文件 —— prompt 内部已包含 workspace_path
+  // 作为上下文信息，spawn cwd 留给 Node.js 默认值（process.cwd()）即可。
   const prompt = buildTeamArchitectPrompt(input);
   const spec = adapter.buildCommand({
     prompt,
-    workingDirectory: input.workspace_path,
     permissive: false,
   });
 
