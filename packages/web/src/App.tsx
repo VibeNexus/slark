@@ -10,6 +10,7 @@ import { useEffect } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { useChannelsStore } from './stores/channels';
 import { useAgentsStore } from './stores/agents';
+import { useProjectsStore } from './stores/projects';
 import { initWSBridge } from './stores/ws-bridge';
 import { wsClient } from './lib/ws';
 import { Layout } from './components/Layout';
@@ -23,13 +24,15 @@ import { SavedPage } from './pages/SavedPage';
 export function App() {
   const refreshChannels = useChannelsStore((s) => s.refresh);
   const refreshAgents = useAgentsStore((s) => s.refresh);
+  const refreshProjects = useProjectsStore((s) => s.refresh);
 
   useEffect(() => {
     initWSBridge();
     wsClient.connect();
+    void refreshProjects();
     void refreshChannels();
     void refreshAgents();
-  }, [refreshChannels, refreshAgents]);
+  }, [refreshProjects, refreshChannels, refreshAgents]);
 
   return (
     <BrowserRouter>

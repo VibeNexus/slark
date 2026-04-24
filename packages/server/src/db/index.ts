@@ -76,6 +76,8 @@ export function closeDb(): void {
 // =============================================================================
 function migrate(db: DB): void {
   ensureColumn(db, 'agent_activity', 'channel_id', 'TEXT');
+  ensureColumn(db, 'channels', 'project_id', 'TEXT');
+  ensureColumn(db, 'agents', 'project_id', 'TEXT');
 }
 
 function ensureColumn(db: DB, table: string, column: string, definition: string): void {

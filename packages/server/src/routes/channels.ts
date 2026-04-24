@@ -3,16 +3,23 @@ import type { Database } from 'better-sqlite3';
 import { channelRepo, agentRepo, messageRepo } from '../db/repos.js';
 
 export async function channelRoutes(app: FastifyInstance, db: Database): Promise<void> {
-  // 列出所有频道
-  app.get('/api/channels', async () => channelRepo.list(db));
+  // 列出频道；可选 ?project_id= 过滤
+  app.get('/api/channels', async (req) => {
+    const query = req.query as { project_id?: string };
+    if (query.project_id) {
+      return channelRepo.listByProject(db, query.project_id);
+    }
+    return channelRepo.list(db);
+  });
 
-  // 创建频道
+  // 创建频道（v1.0：可带 project_id）
   app.post('/api/channels', async (req, reply) => {
     const body = req.body as {
       id?: string;
       name: string;
       description?: string | null;
       type?: 'channel' | 'dm';
+      project_id?: string | null;
     };
     if (!body?.name) {
       reply.code(400);
@@ -23,6 +30,7 @@ export async function channelRoutes(app: FastifyInstance, db: Database): Promise
       name: body.name,
       description: body.description ?? null,
       type: body.type ?? 'channel',
+      project_id: body.project_id ?? null,
     });
   });
 

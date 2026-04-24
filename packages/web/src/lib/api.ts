@@ -85,12 +85,16 @@ export const suggestTeam = (data: {
   });
 
 // Channels
-export const listChannels = () => request<Channel[]>('/api/channels');
+export const listChannels = (projectId?: string) => {
+  const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+  return request<Channel[]>(`/api/channels${qs}`);
+};
 export const getChannel = (id: string) => request<Channel>(`/api/channels/${id}`);
 export const createChannel = (data: {
   name: string;
   description?: string;
   type?: 'channel' | 'dm';
+  project_id?: string;
 }) =>
   request<Channel>('/api/channels', {
     method: 'POST',
@@ -111,7 +115,10 @@ export const stopAllAgents = (id: string) =>
   });
 
 // Agents
-export const listAgents = () => request<Agent[]>('/api/agents');
+export const listAgents = (projectId?: string) => {
+  const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+  return request<Agent[]>(`/api/agents${qs}`);
+};
 export const getAgent = (id: string) => request<Agent>(`/api/agents/${id}`);
 export const createAgent = (data: {
   name: string;
@@ -120,6 +127,7 @@ export const createAgent = (data: {
   model?: string;
   reasoning?: ReasoningEffort;
   env_vars?: Record<string, string>;
+  project_id?: string;
 }) => request<Agent>('/api/agents', { method: 'POST', body: JSON.stringify(data) });
 export const updateAgent = (id: string, patch: Partial<Agent>) =>
   request<Agent>(`/api/agents/${id}`, {

@@ -163,17 +163,34 @@ interface ChannelRow {
   name: string;
   description: string | null;
   type: 'channel' | 'dm';
+  project_id: string | null;
   created_at: number;
 }
 
 function rowToChannel(r: ChannelRow): Channel {
-  return { ...r };
+  return {
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    type: r.type,
+    project_id: r.project_id,
+    created_at: r.created_at,
+  };
 }
 
 export const channelRepo = {
   list(db: Database): Channel[] {
     return (db.prepare('SELECT * FROM channels ORDER BY created_at ASC').all() as ChannelRow[])
       .map(rowToChannel);
+  },
+
+  /** v1.0 新增：按 Project 过滤列表 */
+  listByProject(db: Database, projectId: string): Channel[] {
+    return (
+      db
+        .prepare('SELECT * FROM channels WHERE project_id = ? ORDER BY created_at ASC')
+        .all(projectId) as ChannelRow[]
+    ).map(rowToChannel);
   },
 
   getById(db: Database, id: string): Channel | null {
@@ -183,18 +200,32 @@ export const channelRepo = {
 
   create(
     db: Database,
-    input: { id?: string; name: string; description?: string | null; type: 'channel' | 'dm' },
+    input: {
+      id?: string;
+      name: string;
+      description?: string | null;
+      type: 'channel' | 'dm';
+      project_id?: string | null;
+    },
   ): Channel {
     const id = input.id ?? nanoid();
     const ts = now();
     db.prepare(
-      'INSERT INTO channels (id, name, description, type, created_at) VALUES (?, ?, ?, ?, ?)',
-    ).run(id, input.name, input.description ?? null, input.type, ts);
+      'INSERT INTO channels (id, name, description, type, project_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run(
+      id,
+      input.name,
+      input.description ?? null,
+      input.type,
+      input.project_id ?? null,
+      ts,
+    );
     return {
       id,
       name: input.name,
       description: input.description ?? null,
       type: input.type,
+      project_id: input.project_id ?? null,
       created_at: ts,
     };
   },
@@ -239,6 +270,7 @@ interface AgentRow {
   reasoning: string | null;
   env_vars_json: string | null;
   status: string;
+  project_id: string | null;
   created_at: number;
 }
 
@@ -253,6 +285,7 @@ function rowToAgent(r: AgentRow): Agent {
     reasoning: r.reasoning as ReasoningEffort | null,
     env_vars: r.env_vars_json ? (JSON.parse(r.env_vars_json) as Record<string, string>) : {},
     status: r.status as AgentStatus,
+    project_id: r.project_id,
     created_at: r.created_at,
   };
 }
@@ -284,13 +317,14 @@ export const agentRepo = {
       model?: string | null;
       reasoning?: ReasoningEffort | null;
       env_vars?: Record<string, string>;
+      project_id?: string | null;
     },
   ): Agent {
     const id = input.id ?? nanoid();
     const ts = now();
     db.prepare(
-      `INSERT INTO agents (id, name, avatar, description, runtime, model, reasoning, env_vars_json, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?)`,
+      `INSERT INTO agents (id, name, avatar, description, runtime, model, reasoning, env_vars_json, status, project_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?)`,
     ).run(
       id,
       input.name,
@@ -300,6 +334,7 @@ export const agentRepo = {
       input.model ?? null,
       input.reasoning ?? null,
       input.env_vars ? JSON.stringify(input.env_vars) : null,
+      input.project_id ?? null,
       ts,
     );
     return {
@@ -312,8 +347,18 @@ export const agentRepo = {
       reasoning: input.reasoning ?? null,
       env_vars: input.env_vars ?? {},
       status: 'idle',
+      project_id: input.project_id ?? null,
       created_at: ts,
     };
+  },
+
+  /** v1.0 新增：按 Project 过滤 */
+  listByProject(db: Database, projectId: string): Agent[] {
+    return (
+      db
+        .prepare('SELECT * FROM agents WHERE project_id = ? ORDER BY created_at ASC')
+        .all(projectId) as AgentRow[]
+    ).map(rowToAgent);
   },
 
   update(

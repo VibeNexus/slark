@@ -7,10 +7,16 @@ import { agentRepo, activityRepo } from '../db/repos.js';
 import { agentWorkspacePath } from '../config.js';
 
 export async function agentRoutes(app: FastifyInstance, db: Database): Promise<void> {
-  // 列出所有 agent
-  app.get('/api/agents', async () => agentRepo.list(db));
+  // 列出 agent；可选 ?project_id= 过滤
+  app.get('/api/agents', async (req) => {
+    const query = req.query as { project_id?: string };
+    if (query.project_id) {
+      return agentRepo.listByProject(db, query.project_id);
+    }
+    return agentRepo.list(db);
+  });
 
-  // 创建 agent
+  // 创建 agent（v1.0：可带 project_id）
   app.post('/api/agents', async (req, reply) => {
     const body = req.body as {
       name: string;
@@ -20,6 +26,7 @@ export async function agentRoutes(app: FastifyInstance, db: Database): Promise<v
       reasoning?: ReasoningEffort | null;
       env_vars?: Record<string, string>;
       avatar?: string | null;
+      project_id?: string | null;
     };
     if (!body?.name || !body?.runtime) {
       reply.code(400);
@@ -32,7 +39,8 @@ export async function agentRoutes(app: FastifyInstance, db: Database): Promise<v
 
     const agent = agentRepo.create(db, body);
 
-    // 创建 workspace 目录
+    // 创建 workspace 目录（v0 兼容：若 agent 绑定了 Project，Project.workspace_path 会接管 cwd；
+    //                   但 ~/.slark/agents/{id} 仍保留作为 fallback 目录，D-8 最终废除在 CP6+）
     try {
       mkdirSync(agentWorkspacePath(agent.id), { recursive: true });
     } catch (e) {

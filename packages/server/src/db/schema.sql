@@ -6,17 +6,24 @@ PRAGMA journal_mode = WAL;
 
 -- =============================================================================
 -- 1. channels
+--
+-- v1.0 新增 project_id 列（D-13）；对旧 db 由 db/index.ts 的 migrate() 幂等补列。
+-- Sprint 1 CP5 后 Create Project 向导会强制填入 project_id；CP6+ 将 NOT NULL。
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS channels (
   id              TEXT PRIMARY KEY,
   name            TEXT NOT NULL,
   description     TEXT,
   type            TEXT NOT NULL CHECK(type IN ('channel','dm')),
+  project_id      TEXT REFERENCES projects(id) ON DELETE CASCADE,
   created_at      INTEGER NOT NULL
 );
 
 -- =============================================================================
 -- 2. agents
+--
+-- v1.0 新增 project_id 列（D-13）；对旧 db 由 migrate() 幂等补列。
+-- v0 的 status 字段 CP5 会移除，目前仍保留以不破坏现有前端。
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS agents (
   id              TEXT PRIMARY KEY,
@@ -29,6 +36,7 @@ CREATE TABLE IF NOT EXISTS agents (
   env_vars_json   TEXT,
   status          TEXT NOT NULL DEFAULT 'idle'
                   CHECK(status IN ('idle','thinking','working','error','stopped')),
+  project_id      TEXT REFERENCES projects(id) ON DELETE CASCADE,
   created_at      INTEGER NOT NULL
 );
 
