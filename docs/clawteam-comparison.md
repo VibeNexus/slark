@@ -83,6 +83,28 @@
 
 ---
 
+## 4.5 Sprint 映射汇总（按 `PLAN.md` v1.0.1）
+
+每个 B-N 借鉴条目在 Slark v1.0 Sprint 路线图里的映射：
+
+| # | 条目 | Slark Sprint 映射 | 状态 |
+|---|------|------------------|------|
+| **B-1** | Git Worktree 多 Agent 隔离 | **Sprint 8+ 远期路线**（🔴 高优先级，多 Agent 真正并发改代码时必须） | 未排期 |
+| **B-2** | 协调协议注入（内联指令） | **Sprint 3 Responsibility + User Intervention**（`/approve` `/reject` `/abort` `/override` `/comment` 指令，对应 `product-brief §D-5`） | 🔵 规划中 |
+| **B-3** | 任务依赖图（`blocked_by`） | **Sprint 8+ 远期路线**（🟡 中；Slark 版用 `tasks.blocked_by_ids` 字段 OR `task_dependencies` join 表） | 未排期 |
+| **B-4** | 团队模板（Launch Team） | **Sprint 2 Workflow Framework**（3 个内置模板 = 团队模板最小版；用户自定义模板 Marketplace 归 R-21 Sprint 8+） | 🔵 规划中 |
+| **B-5** | Plan Approval 流程 | **Sprint 3 Responsibility + User Intervention**（Approval Flow + `await_approval` step + Approval Card 组件） | 🔵 规划中 |
+| **B-6** | Tiled Live View（多 Agent 并排实时输出） | **Sprint 8+ 远期路线**（🟡 中，Slark 相对 ClawTeam 的差异化机会） | 未排期 |
+| **B-7** | Lifecycle / Idle 主动通知 | **Sprint 3（`/done` 指令合并到 B-2）+ Sprint 5（Evolution Loop 补主动通知语义）** | 🔵 规划中（分摊） |
+| **B-8** | Per-Task 持续会话（长驻进程） | ⛔ **永远不做**，与 `D-12 spawn-per-message` 哲学冲突 | 已废弃 |
+
+**读法**：
+- 🔵 规划中：该 Sprint 启动前需要回读此条目确认设计细节
+- 未排期：`PLAN.md` Sprint 8+ 列为候选，没有明确排期
+- ⛔ 已废弃：已决定不做，后续若要推翻需创建新的 ADR（参考 `optimization-backlog.md` 的废弃条目流程）
+
+---
+
 ## 5. 可借鉴条目清单（B-N）
 
 每条条目独立描述，包含五部分：
@@ -93,6 +115,8 @@
 - **参考优先级 / 风险**
 
 ### B-1: Git Worktree 多 Agent 隔离
+
+**状态**: 未排期（Sprint 8+，🔴 高优先级）
 
 > 解决 `product-brief §8 K-5` + 劣势 W-1。**本清单中唯一的 🔴 高优先级条目**。
 
@@ -186,6 +210,8 @@ DELETE /api/channels/:id/worktrees/:agentId        删除 worktree（保留 bran
 
 ### B-2: 自动注入协调协议到 Agent 上下文
 
+**状态**: 🔵 规划中（Sprint 3 `/approve` `/reject` `/abort` `/override` 等指令落地）
+
 > 解决劣势 W-2：让 Agent 从被动响应变主动协作。**低成本高收益**。
 
 #### ClawTeam 做法
@@ -275,6 +301,8 @@ for (const d of directives) {
 
 ### B-3: 任务依赖图（`blocked_by`）
 
+**状态**: 未排期（Sprint 8+，🟡 中优先级）
+
 > 解决劣势 W-4：把 Tasks 从"简单状态机"升级成"工作流编排"。
 
 #### ClawTeam 做法
@@ -347,6 +375,8 @@ POST /api/tasks  body 新增 blocked_by: number[]
 ---
 
 ### B-4: 团队模板（Launch Team）
+
+**状态**: 🔵 规划中（Sprint 2 内置 3 个模板 + Sprint 8+ R-21 Marketplace）
 
 > 解决劣势 W-3，是 ClawTeam 最有"病毒传播"潜力的设计。
 
@@ -477,6 +507,8 @@ POST   /api/templates/:slug/launch          body: { channel_name, workspace_path
 
 ### B-5: Plan Approval 流程
 
+**状态**: 🔵 规划中（Sprint 3 演化为 Approval Flow + Approval Card 组件）
+
 > 解决劣势 W-6：Agent 干活前先让人看一眼方案。
 
 #### ClawTeam 做法
@@ -546,6 +578,8 @@ body: |
 
 ### B-6: Tiled Live View（多 Agent 并排实时输出）
 
+**状态**: 未排期（Sprint 8+，🟡 中优先级，差异化机会）
+
 > 这是 Slark 相对 ClawTeam 的**差异化机会**——Web UI 天然能比 tmux 做得更优雅。
 
 #### ClawTeam 做法
@@ -601,6 +635,8 @@ clawteam board attach <team>   # 平铺 tmux，看 N 个 agent 同时滚屏
 
 ### B-7: Lifecycle / Idle 主动通知
 
+**状态**: 🔵 规划中（Sprint 3 合并 `/done` 指令 + Sprint 5 Evolution Loop 补主动通知语义）
+
 > 让 `D-1` 状态机的 `idle` 态从"被动状态"变成"主动信号"。低成本。
 
 #### ClawTeam 做法
@@ -643,6 +679,8 @@ Sidebar 能看到 `🟢 alice (idle, finished T#27)`
 ---
 
 ### B-8: Per-Task 持续会话（复用上下文）
+
+**状态**: ⛔ 已废弃 —— 与 `D-12 spawn-per-message` 哲学冲突。若要推翻需创建新 ADR。
 
 > 对比 `D-12` 的 spawn-per-message，这是"重型任务"场景下的效率优化。争议较大，建议放 P2。
 
@@ -733,6 +771,7 @@ tmux new-window -n worker1 'cursor-agent --interactive'
 | 版本 | 日期 | 变更 | 作者 |
 |------|------|------|------|
 | v0.1 | 2026-04-23 | 初版：基于 ClawTeam v0.2.0 README 的对比分析 + 8 条借鉴条目 | - |
+| v0.2 | 2026-04-23 | 对齐 `PLAN.md v1.0.1` Sprint 路线图：新增 §4.5 Sprint 映射汇总表；每个 B-N 条目加状态标签（B-2/B-4/B-5/B-7 🔵 规划中；B-1/B-3/B-6 未排期；B-8 ⛔ 已废弃） | - |
 
 ---
 

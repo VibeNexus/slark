@@ -7,7 +7,7 @@
 > | 文档 | 性质 | 内容 |
 > |------|------|------|
 > | [`docs/product-brief.md`](product-brief.md) | 战略 | 产品定位 / 目标用户 / 非目标 |
-> | [`PLAN.md`](../PLAN.md) | 战术（已排期） | 4 阶段 MVP 路线 + 验收清单 |
+> | [`PLAN.md`](../PLAN.md) | 战术（已排期） | Sprint 1~8+ 路线 + 验收清单（按 `product-brief v1.0.1`）|
 > | [`docs/technical-decisions.md`](technical-decisions.md) | 实现（已落地决策） | D-N 默认决策 |
 > | [`docs/clawteam-comparison.md`](clawteam-comparison.md) | 调研（候选借鉴） | B-N 借鉴条目（ClawTeam） |
 > | [`docs/research/routa-analysis.md`](research/routa-analysis.md) | 调研（候选借鉴） | B-N 借鉴条目（Routa） |
@@ -19,7 +19,7 @@
 >
 > ```
 >   候选借鉴 (B-N)  ──┐
->   用户反馈        ──┼──► 讨论收敛 ──► O-N（本文档）──► 排期进 PLAN.md (MVP-N) ──► 交付完成
+>   用户反馈        ──┼──► 讨论收敛 ──► O-N（本文档）──► 排期进 PLAN.md (Sprint-N) ──► 交付完成
 >   内部讨论        ──┘                                                              │
 >                                                                                     │
 >                                                                                     ▼
@@ -28,7 +28,7 @@
 > ```
 >
 > **何时读本文档**：
-> - 规划下一个 Sprint / Phase 时，从本文档挑条目 → 进 `PLAN.md`
+> - 规划下一个 Sprint 时，从本文档挑条目 → 进 `PLAN.md`
 > - 有人提"Slark 要不要做 X"时，先查本文档是否已收敛（B-N 阶段还是 O-N 阶段）
 > - 条目状态变化时（排期 / 完成 / 废弃）及时更新本文档
 >
@@ -36,8 +36,8 @@
 >
 > | 标记 | 含义 |
 > |------|------|
-> | `[待排期]` | 已决定做，等待纳入 PLAN.md 某个 MVP |
-> | `[规划中]` 🔵 | 已进入 PLAN.md 某个 MVP，实现未开始 |
+> | `[待排期]` | 已决定做，等待纳入 PLAN.md 某个 Sprint |
+> | `[规划中]` 🔵 | 已进入 PLAN.md 某个 Sprint，实现未开始 |
 > | `[进行中]` 🟡 | 正在实现 |
 > | `[已完成]` ✅ | 已交付，条目留档供溯源（一段时间后归档） |
 > | `[已废弃]` ⛔ | 讨论后决定不做，移至文末"废弃条目"区 |
@@ -74,14 +74,14 @@
 
 **状态**: `[待排期]`
 
-**优先级**: 🔴 高（低成本、高价值、直接提升 MVP-9 完成度）
+**优先级**: 🔴 高（低成本、高价值，补齐 v0 MVP Tasks 面板的协作闭环）
 
 **来源**: `routa-analysis.md` §5.2 B-6 + 2026-04-23 讨论收敛
 
 **价值**:
 - Task 状态机本身就是协作指令，用户不需要在"点击状态"之后再手动 `@Alice`
 - 让 `assignee_agent_id` 字段从"元数据"变成"活字段"
-- 让 MVP-9 验收的"Task 生命周期"场景更像真的协作
+- 让 v0 MVP 已交付的"Task 生命周期"场景更像真的协作
 
 ---
 
@@ -125,7 +125,7 @@ async function moveTask(taskId, newStatus, movedBy) {
 }
 ```
 
-**依赖**: MVP-7 已实现的 `messageRouter.triggerAgent()`（链式触发机制，`D-6`）
+**依赖**: v0 MVP 已交付的 `messageRouter.triggerAgent()`（链式触发机制，`D-6`）
 
 **链式防护**:
 - 触发当做一次独立链，`chain_depth` 从 0 开始（不继承任何 Thread）
@@ -287,7 +287,7 @@ ORDER BY created_at ASC;
 
 **优先级**: 🟡 中
 
-**来源**: 2026-04-23 讨论（`PLAN.md` MVP-2 已设计 `source_message_id` 字段，但 UI 没用起来）
+**来源**: 2026-04-23 讨论（v0 MVP schema 已设计 `source_message_id` 字段，但 UI 没用起来）
 
 **价值**:
 - 让 "As Task" 机制闭环：用户从某条消息建了 Task，能在消息旁看到"已创建 #27"
@@ -297,8 +297,8 @@ ORDER BY created_at ASC;
 ---
 
 **当前行为**:
-- `tasks.source_message_id` 字段存在（PLAN.md MVP-2 schema）
-- 后端 "As Task" 时正确写入（MVP-9 预留能力）
+- `tasks.source_message_id` 字段存在（v0 MVP schema）
+- 后端 "As Task" 时正确写入（v0 MVP Tasks 已预留能力）
 - **前端 UI 没有用这个字段**：
   - Task 详情里看不到来源消息
   - 消息卡片里看不到"已创建过 Task"
@@ -428,7 +428,7 @@ ORDER BY created_at ASC;
 - [ ] 每个卡片点状态 badge 仍能切换状态（O-1 的自动触发依然生效）
 - [ ] 视图选择持久化到 URL（`?tasksView=columns`），刷新保持
 - [ ] 视觉对齐 `docs/ui-reference/design-tokens.md`（2px 黑边 + 硬阴影 + 对应状态色）
-- [ ] 默认视图是 List（保留 MVP-9 原体验）
+- [ ] 默认视图是 List（保留 v0 MVP Tasks 原体验）
 - [ ] 小屏（< 768px）自动降级为 List 视图（不出现横向滚动）
 
 ---
@@ -463,12 +463,12 @@ ORDER BY created_at ASC;
 | Agent Template 里标 `role=reviewer` 并做特殊路由 | Agent Template（`routa-analysis.md` B-2）可以有 `role` 字段，但**只用于 prompt 注入**，不在路由层生效 |
 
 **与 Slark 定位的关系**:
-- `docs/product-brief.md` §3 场景 A 里的 "Architect → Dev → Reviewer" **是用户自己编排的协作拓扑**，靠 `@mention` 链式触发实现（MVP-7 的 `D-6`）
+- `docs/product-brief.md` §3 场景 A 里的 "Architect → Dev → Reviewer" **是用户自己编排的协作拓扑**，靠 `@mention` 链式触发实现（v0 MVP 已交付的 `D-6`）；v1.0 Sprint 2~3 后演化为 Workflow 声明式编排
 - **Slark 不为任何角色（Reviewer / Architect / Dev）做系统层面的特殊路由**
 - 这是 Slark 和 Routa 的关键分岔：Routa 是 **"系统编排协作"**，Slark 是 **"用户编排协作，系统只做传导"**
 
 **后续若变更此决策**:
-- 需要先修改 `docs/product-brief.md` §9（编程协作室的语义）
+- 需要先修改 `docs/product-brief.md` §6 D-8（编程协作定位）
 - 创建 ADR 格式决策（新的 `D-N`）标 `Supersedes: O-废弃/reviewer-trigger`
 - 在本条目下追加"已复活于 YYYY-MM-DD 依据 D-N"记录
 
@@ -536,6 +536,7 @@ ORDER BY created_at ASC;
 | 版本 | 日期 | 变更 | 作者 |
 |------|------|------|------|
 | v0.1 | 2026-04-23 | 初版：O-1 ~ O-4 Task 设施优化条目；废弃"Reviewer 自动触发"决策 | - |
+| v0.2 | 2026-04-23 | 对齐 `PLAN.md v1.0.1` Sprint 路线图：流向图 `MVP-N` → `Sprint-N`；状态标记约定同步；O-1/O-3/O-4 内文的 `MVP-N` 引用替换为 `v0 MVP` / `v1.0 Sprint`；`product-brief.md` 引用章节号按 v1.0 结构调整 | - |
 
 ---
 
