@@ -1,8 +1,34 @@
 # Technical Decisions & Defaults
 
 > Slark 项目的默认技术决策与常量。开发中遇到本文档覆盖的问题时，以此为准；发现不合理时通过 PR 修改本文档 + 关联代码。
+>
+> 所有决策编号为 `D-N`，可以在代码注释和 commit message 中引用（例 "Fix D-4 budget overflow"）。
 
-所有决策编号为 `D-N`，可以在代码注释和 commit message 中引用（例 "Fix D-4 budget overflow"）。
+## 对齐 `product-brief.md` v1.0.1
+
+本文档是战略文档 [`product-brief.md`](product-brief.md) v1.0.1 的**实现层映射**。每条 `D-N` 要么是 product-brief 里某条核心决策的**技术细节补充**（常量、默认值、schema），要么是 product-brief 未覆盖的**纯实现约束**（错误 UI / 启动方式 / token 预算等）。
+
+| D-N | 对齐的 product-brief 章节 | 性质 |
+|-----|-----------------------|------|
+| D-1 / D-2 | §D-7 多项目并发隔离（状态派生 per-channel） | 细节补充 |
+| D-3 | §D-7（`agent_activity` schema） | 细节补充 |
+| D-4 / D-5 | §5.1 ContextBuilder / spawn-per-message | 细节补充 |
+| D-6 | §D-7 K-2（链式触发 per-thread 计数） | 细节补充 |
+| D-7 | §D-5 Responsibility metadata 之一 | 细节补充 |
+| D-8 | §D-8 Slark 无 Agent 独立 workspace | 细节补充 |
+| D-9 | §D-3 Goal 驱动的 Create Project 流程 | 细节补充 |
+| D-10 / D-11 | 无对应战略条目（纯实现） | 纯实现 |
+| D-12 | §C-1 Cursor Adapter 流式策略 | 细节补充 |
+| **D-13** | §D-2 Server = Project | v1.0 新增锚点 |
+| **D-14** | §D-3 Goal 是一等公民 | v1.0 新增锚点 |
+| **D-15** | §6 System Agents | v1.0 新增锚点 |
+| **D-16** | §D-4 Workflow 即甬道 | v1.0 新增锚点 |
+| **D-17** | §D-5 Responsibility 即 Step × Agent | v1.0 新增锚点 |
+| **D-18** | §D-7 多 Project 并发隔离六层契约 | v1.0 新增锚点 |
+| **D-19** | §D-3 Team Architect 兜底三件套 | v1.0 新增锚点 |
+| **D-20** | §5.3 四个运营闭环 | v1.0 新增锚点 |
+
+**冲突规则**：本文档与 product-brief 冲突时，**以 product-brief 为准**。本文档只负责承载"实现细节"，不决定产品定位。
 
 ---
 
@@ -20,11 +46,21 @@
 | `error` | 上一次 spawn 失败/超时/非 0 退出 | 🔴 红色 |
 | `stopped` | 用户显式 Stop，需手动 Start 才能再次响应 | ⚫ 灰色 |
 
+### 存储方式（v1.0.1 修订）
+
+原 `agents.status` 单值字段**已废除**（v0 设计的隔离缺陷 K-1）。状态改为 **per-channel 派生**：
+
+- 新建 `agent_runs(id, agent_id, channel_id, status, started_at, ended_at)` 表记录每次 spawn
+- 查询 Agent 在指定 channel 的当前状态：`SELECT status FROM agent_runs WHERE agent_id=? AND channel_id=? AND ended_at IS NULL`
+- Sidebar 全局状态点派生自 "any active run"；DM Header 等精细位置显示 per-channel 状态
+- 详见 `product-brief.md §D-7 K-1`
+
 ### 理由
 
 - `spawn-per-message` 模型下没有"长期在线"的进程，删除 `Online`/`Hibernating` 避免误导
 - `idle` 对应原版 "Online"（已注册可用）
 - `thinking` / `working` 拆分保留，前端可据此切换加载图标
+- per-channel 派生解决同一 Agent 并发在多个 channel 时状态互相覆盖问题
 
 ### 状态转移
 
@@ -67,11 +103,18 @@
 
 `agent_activity` 表用于 Profile → Activity Tab 实时日志。**不等同于消息流**，只记录"元事件"。
 
+### Schema（v1.0.1 修订）
+
+- 原 v0 schema 缺 `channel_id` 字段，UI 混展不同 channel 的活动（K-3）
+- **v1.0.1 起** `agent_activity` 必须包含 `channel_id TEXT REFERENCES channels(id) ON DELETE CASCADE`
+- 索引：`idx_activity_agent_channel(agent_id, channel_id, created_at DESC)`
+- Activity Tab 提供 "filter by channel" 下拉
+
 ### 记录规则
 
 | 触发 | 写一条 activity | 示例 `detail` |
 |------|-----------------|---------------|
-| spawn 开始 | `type=thinking` | `"Spawning codex with model=gpt-5.4"` |
+| spawn 开始 | `type=thinking` | `"Spawning cursor with model=composer-2-fast"` |
 | 首个 text/tool 事件 | `type=working` | `"Started generating response"` |
 | 每个 `tool_started` | `type=working` | `"Shell: ls -la /path"` |
 | 每个 `tool_completed` | `type=output` | `"Shell completed (exit=0)"` |
@@ -85,7 +128,7 @@
 
 ### 保留策略
 
-- 每个 agent 保留最近 **500 条 activity**，超出从头删除
+- 每个 agent 保留最近 **500 条 activity**（全 channel 合并），超出从头删除
 - Profile → Activity Tab 分页加载（每页 50 条）
 
 ---
@@ -133,15 +176,23 @@
 | 常量 | 默认值 | 说明 |
 |------|--------|------|
 | `MAX_CHAIN_DEPTH` | `10` | 一次链式触发最多传递多少层 |
-| `MAX_AGENT_CONSECUTIVE_TRIGGERS` | `3` | 同一 agent 在一个 thread 内连续被触发次数上限 |
+| `MAX_AGENT_CONSECUTIVE_TRIGGERS` | `3` | 同一 agent 在**同一 thread** 内连续被触发次数上限 |
 | `MAX_MENTIONS_PER_MESSAGE` | `5` | 单条消息 @mention 他人的上限（超出不触发后面的） |
+
+### 计数维度（v1.0.1 明确）
+
+所有计数**按 thread 作用域**，**不按 agent 全局**（K-2 修正）：
+
+- `chain_depth` 沿 `messages.parent_id` 树累加，切换到不同 thread 时**重置为 0**
+- `consecutive_triggers` 只在同一 thread 内累加，同一 Agent 在不同 thread 的触发互不相关
+- 这保证：Agent 同时被两个 thread 各触发 2 次，**不会误伤**（只有单个 thread 里连续触发才计数）
 
 ### 行为
 
 - 消息带 `chain_depth` metadata（从 0 开始）
 - Message Router 在触发下一 Agent 前检查：
   - 当前 thread 消息数 >= `MAX_CHAIN_DEPTH` → 停止触发 + 发 system 消息 `"Chain depth limit reached"`
-  - 同一 agent 在当前 thread 内连续被触发 >= 3 → 停止 + `"Possible infinite loop detected"`
+  - 同一 agent 在**当前 thread** 内连续被触发 >= 3 → 停止 + `"Possible infinite loop detected"`
 - User 主动 @mention 不受 `consecutive` 限制（只防 Agent 间循环）
 
 ---
@@ -208,69 +259,83 @@ type MessageMetadata = {
 
 ---
 
-## D-8: Agent Workspace 目录
+## D-8: Slark 不提供 Agent 独立 workspace（v1.0 修订 / 原决策作废）
 
-### 路径
+### v0 设计（已作废，仅供对比）
 
+v0 设计给每个 Agent 分配 `~/.slark/agents/{agent_id}/` 作为 cwd 沙盒 + 记忆目录。该设计在 v1.0 **全面废弃**。
+
+### v1.0 决策
+
+Slark **不提供** Agent 独立 workspace。原因：
+1. 聚焦"编程协作" + 关闭"自主学习型 Agent" 口子后，Agent 的记忆通过其他机制承载（见下）
+2. 原沙盒同时兼 cwd 和记忆职责，混淆了"当下工作目录"和"长期私人空间"
+3. 多 Project 并发时沙盒成为共享 cwd，两 Project 会冲突（K-5）
+
+### Agent cwd 的唯一来源
+
+```typescript
+// CLIRunner 构造 spawn 参数
+const project = projectsRepo.byId(channel.project_id);
+const cwd = project.workspace_path;  // 必填（D-13），不再有兜底
 ```
-~/.slark/
-├── slark.db                  # SQLite 数据库主文件
-├── agents/
-│   └── {agent_id}/           # 每个 Agent 一个目录
-│       ├── (由 CLI 工具自行创建的文件，Slark 不预置)
-│       └── (Claude Code 可能创建 CLAUDE.md 等)
-└── logs/
-    └── {date}/               # 按日期分目录
-        └── {agent_id}.log    # Agent 执行日志
-```
 
-### 规则
+- `projects.workspace_path` 是 `NOT NULL`
+- 不存在"纯聊天 Project"的回退路径（N-11）
 
-- **Create Agent 时**：MVP-8 流程中 `mkdir -p ~/.slark/agents/{agent_id}/`
-- **spawn CLI 时**：将该目录作为 `child_process.spawn` 的 `cwd`
-- **Slark 不预置任何文件**（D-1 记忆哲学）
-- **Delete Agent 时**：可选删除目录（需用户确认，默认保留作为"归档"）
+### Agent 记忆的承载机制
 
-### Workspace Tab UI
+原本想让 workspace 承载的"Agent 长期记忆"，在 v1.0 通过以下机制分摊：
 
-- 展示目录内文件树（递归最多 3 层）
-- 支持打开查看纯文本 / markdown 文件
-- 不支持编辑（MVP）——未来迭代可加
+| 原职责 | v1.0 新归属 |
+|-------|-----------|
+| 跨对话对话历史 | Slark `messages` 表 + ContextBuilder 注入（D-4）|
+| Agent 人格（长期 description）| `agents.description` 字段；由 Coach 演化（§D-6 Evolution Loop）|
+| 项目知识（team_rules）| `projects.team_rules` + `decisions` / `lessons` 表（D-20）|
+| 项目级 Agent 约束 | CLI 原生的 `<workspace>/AGENTS.md` / `CLAUDE.md` / `.cursor/rules/`（Slark 不插手）|
 
-### 验证逻辑
+### Agent Profile Tab 简化
 
-Create Agent 前校验 `~/.slark/` 是否可写，不可写时报错并阻止创建。
+原 3 Tab（PROFILE / WORKSPACE / ACTIVITY）改为 **2 Tab（PROFILE / ACTIVITY）**；FEEDBACK Tab 在 Sprint 5 上线作为第 3 个 Tab。
+
+### 迁移操作
+
+v0 → v1.0 升级时直接删除 `~/.slark/slark.db` 和 `~/.slark/agents/`（见 `product-brief.md §11` 迁移策略）。
 
 ---
 
-## D-9: Seed 数据
+## D-9: Seed 数据（v1.0 修订）
 
-首次启动（`slark.db` 不存在时）自动执行:
+### 决策
+
+首次启动（`slark.db` 不存在时）**不预置任何 Project / Channel / Agent**。
 
 ```
-channels:
-  - id: "general"
-    name: "general"
-    description: "General channel"
-    type: "channel"
-
-agents: (根据本地检测动态决定)
-  - 如果 cursor-agent 已安装：
-      创建 "Assistant" agent, runtime="cursor", model="composer-2-fast"
-  - 否则跳过（只有欢迎页引导安装）
-
-channel_agents:
-  - 将 Assistant 加入 #general
-
-messages: (空)
-tasks: (空)
+projects:        (空)
+channels:        (空)
+agents:          (空)
+channel_agents:  (空)
+messages:        (空)
+tasks:           (空)
 ```
 
-用户第一次打开应用就能立刻和 Assistant 对话，不会面对空白状态。
+### 首次体验
 
-### MVP Runtime 范围（见 PLAN MVP-4）
+- 前端检测 `/api/projects` 返回空 → 显示 **Welcome 页**
+- Welcome 页引导用户点 `[+ New Project]` → Create Project 三步向导（详见 `PLAN.md Sprint 1 §1.3.2`）
+- 第一步填 Name + Goal + Workspace
+- 第二步由 Team Architect System Agent 自动推荐团队（D-15 / D-19）
+- 用户 Approve 后才创建第一批数据
 
-MVP 只实装 Cursor 适配器。Runtime 下拉展示 6 个选项：
+### 为什么不预置
+
+- v0 预置的 `#general` + 默认 Assistant Agent 是"聊天室"心智的残留
+- Slark v1.0 定位是 **Programmable AI Team OS**，Project 是一等公民（D-13），必须由 Goal 驱动创建
+- 任何预置都会误导用户理解 Slark 的正确用法
+
+### MVP Runtime 范围
+
+MVP 只实装 Cursor 适配器。Create Agent / Team Architect 的 Runtime 下拉展示 6 个选项：
 
 | Runtime | MVP 状态 |
 |---------|---------|
@@ -283,8 +348,9 @@ MVP 只实装 Cursor 适配器。Runtime 下拉展示 6 个选项：
 
 ### 如果本地没有 Cursor CLI？
 
-- 不创建 Agent
-- 欢迎页显示引导："No Cursor CLI detected. Install `cursor-agent` from Cursor IDE to create your first agent. [View Installation Guide]"
+- Welcome 页允许继续 Create Project（不阻断）
+- Step 2 Team Architect 走兜底三件套（D-19）
+- 黄色警告条提示安装 `cursor-agent` 后再配 Agent runtime
 
 ---
 
@@ -351,13 +417,13 @@ MVP 只实装 Cursor 适配器。Runtime 下拉展示 6 个选项：
 
 以下决策等到具体 Phase 时再定：
 
-### O-1: 前端组件库选型（在 MVP-5 启动时定）
+### O-1: 前端组件库选型（v0 MVP 已落地 Tailwind + Radix）
 
 **推荐**：Tailwind + Radix UI Primitives（无样式 accessibility 原语，样式全自写）
 
 理由：slock.ai 的 Neo-Brutalism 风格（2px 黑边 + 硬阴影 + 零渐变 + 粉黄强色）与 shadcn/ui 默认风格冲突严重，深度定制 shadcn 的成本 ≥ 自写；但完全裸写需要自行处理 a11y（Focus trap、Dialog、Menu 等）。Radix 是最佳中间方案。
 
-### O-2: UI 对比验收方式（在 MVP-5 启动时定）
+### O-2: UI 对比验收方式（v0 MVP 已采用并排截图方案）
 
 **推荐**：**组件清单逐项核验** + **关键页面并排截图**
 
@@ -367,13 +433,13 @@ MVP 只实装 Cursor 适配器。Runtime 下拉展示 6 个选项：
 
 待 Phase 0 跑完后根据实际 JSON 输出更新 `docs/cli-event-format.md`。
 
-### O-4: Electron/Tauri 打包选型（Phase 4，MVP 外）
+### O-4: Electron/Tauri 打包选型（Sprint 8+ 远期）
 
-不在 MVP 范围。
+不在 v1.0 MVP（Sprint 1~7）范围，列入 `product-brief §7 R-23`。
 
 ---
 
-## D-12: Cursor CLI 流式策略（MVP-4 决定）
+## D-12: Cursor CLI 流式策略（v0 MVP 已落地）
 
 ### 决策
 
@@ -397,4 +463,297 @@ Cursor 的 `--stream-partial-output` 会产生两阶段输出：
 
 - **TTFB**：5-15s（见 Phase 0 基线），但 thinking 阶段 4.5s 就开始流式反馈
 - **未来优化方向**：Runner 层加"伪流式"切片 emit（固定间隔把 text.completed 分段 emit 为 text.delta），可获得打字机效果而不引入 replay 风险
+
+---
+
+## v1.0 新增决策（D-13 ~ D-20）
+
+这一组决策对应 product-brief v1.0.1 的 6 层架构 / 4 Loop / 6 System Agents。**每条都是锚点**，详细产品语义以 `product-brief.md` 为准；此处只承载"实现层约束"。
+
+---
+
+## D-13: Project 是一等公民
+
+对齐：`product-brief.md §D-2 Server = Project`
+
+### Schema
+
+```sql
+CREATE TABLE projects (
+  id              TEXT PRIMARY KEY,
+  name            TEXT NOT NULL UNIQUE,        -- URL slug (lowercase, dash/underscore only)
+  display_name    TEXT,
+  workspace_path  TEXT NOT NULL,               -- 必填！绝对路径
+  goal            TEXT NOT NULL,               -- 必填！详见 D-14
+  team_rules      TEXT,                        -- 可选团队协作规则
+  color           TEXT,
+  created_at      INTEGER NOT NULL
+);
+
+ALTER TABLE channels ADD COLUMN project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE;
+ALTER TABLE agents   ADD COLUMN project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE;
+```
+
+### URL 结构
+
+```
+/p/{projectName}/channel/{channelId}
+/p/{projectName}/dm/{dmId}
+/p/{projectName}/tasks
+/p/{projectName}/intelligence       (Sprint 4 新增)
+```
+
+### 全局跨 Project 视图
+
+暂不做（见 `product-brief §7 R-19`，Sprint 8+）。
+
+---
+
+## D-14: Goal 字段
+
+对齐：`product-brief.md §D-3 Goal 是一等公民`
+
+### 约束
+
+- **必填**：Create Project 无 Goal 则拒绝
+- **长度上限 500 字符**（Q-3 决议）：UI 显示字符计数，超出截断并提示
+- **注入位置**：ContextBuilder 将 Goal 放在 prompt 最顶部（高于 description 和 team_rules）
+
+### prompt 注入样例
+
+```
+[Project Goal]
+<project.goal>
+
+[Team Rules]
+<project.team_rules>
+
+[Your Role]
+<agent.description>
+
+...
+```
+
+---
+
+## D-15: System Agents 架构
+
+对齐：`product-brief.md §6 System Agents`
+
+### 6 个内置 System Agent
+
+| Agent | Sprint | 职责 | 实现 |
+|-------|--------|------|------|
+| **Team Architect** | Sprint 1 | Goal → 推导 Team | 复用 CursorAdapter + 特殊 description（Slark 内置，不暴露）|
+| **Scribe** | Sprint 4 | 沉淀 decisions / lessons | 同上 |
+| **Evaluator** | Sprint 5 | 定期评估 Agent 产出 | 后台 cron 触发 |
+| **Coach** | Sprint 5 | 提 description 修改建议 | 依赖 Evaluator 输出 |
+| **Onboarder** | Sprint 6 | 分析 codebase 生成 onboarding 包 | Project 创建时触发 |
+| **Facilitator** | Sprint 7 | 主持 Workflow Design Session | 多轮对话，产出 YAML |
+
+### 共享约束
+
+- **Runtime**：Q-1 决议，全部用 Cursor Agent（复用 CLIAdapter 架构）
+- **不出现在 Sidebar**：用户看不到它们作为"成员"，避免 @mention 触发
+- **权限**：可写 System-owned 表（decisions / lessons / agent_feedback / project_onboarding），不可改用户的 agents / channels / messages 直接内容
+- **token 配额**：Q-5 待决议（Sprint 4 启动前拍板），建议独立配额
+
+---
+
+## D-16: Workflow 声明式 YAML
+
+对齐：`product-brief.md §D-4 Workflow 即甬道`
+
+### Schema
+
+```sql
+CREATE TABLE workflows (
+  id              TEXT PRIMARY KEY,
+  project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name            TEXT NOT NULL,
+  description     TEXT,
+  trigger_command TEXT UNIQUE,               -- 如 "/new-feature"
+  definition_yaml TEXT NOT NULL,             -- YAML 源码
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL
+);
+
+CREATE TABLE workflow_runs (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  workflow_id     TEXT NOT NULL REFERENCES workflows(id),
+  channel_id      TEXT NOT NULL REFERENCES channels(id),
+  thread_id       TEXT,
+  status          TEXT NOT NULL CHECK(status IN ('running','completed','aborted','failed')),
+  current_step    TEXT,
+  started_by      TEXT,
+  started_at      INTEGER NOT NULL,
+  ended_at        INTEGER,
+  state_json      TEXT
+);
+```
+
+### YAML 字段约定
+
+```yaml
+name: feature-development
+trigger:
+  command: "/new-feature"
+steps:
+  - id: <string>
+    owner: "@AgentName" | "local-user"
+    action: "approve_or_reject" | omitted (执行步骤)
+    on_complete: <next step id>
+    on_approve: <next step id>
+    on_reject: <next step id>
+    input: <prev step id>             # 可选
+    output: <string tag>              # 可选
+```
+
+- `origin` 字段**不保留**（N-14）——所有 Workflow 一视同仁
+- Workflow YAML 版本控制（Q-4 待决议）建议靠 Export，不入 SQL
+
+---
+
+## D-17: Responsibilities = Step × Agent
+
+对齐：`product-brief.md §D-5 Responsibility 即 Step × Agent`
+
+### Schema
+
+```sql
+CREATE TABLE responsibilities (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  workflow_id       TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  step_id           TEXT NOT NULL,
+  agent_id          TEXT REFERENCES agents(id),     -- 可为 'local-user'
+  role              TEXT NOT NULL CHECK(role IN ('executor','approver','reviewer','informed')),
+  authority         TEXT CHECK(authority IN ('must_approve','optional_approve','no_authority')),
+  created_at        INTEGER NOT NULL
+);
+```
+
+### RACI 语义
+
+- `executor` = R（责任人）
+- `approver` = A（可一票否决）
+- `reviewer` = C（可评论，不阻塞）
+- `informed` = I（仅通知）
+
+### 自动推导 vs 手动编辑
+
+- Sprint 2 起：从 Workflow YAML 自动推导（`owner` → `executor`）
+- Sprint 3 起：支持 UI 手动编辑 override
+- Sprint 3 起：`'local-user'` 成为合法 agent_id，作为系统一等 "Agent"
+
+---
+
+## D-18: 多 Project 并发隔离六层契约
+
+对齐：`product-brief.md §D-7 六层隔离模型`
+
+### 层次表
+
+| 层级 | 隔离 | 机制 |
+|------|------|------|
+| 进程层 | 完全 | spawn-per-message（每次独立 PID） |
+| Channel 级（对话历史） | 完全 | `WHERE channel_id = ?` |
+| Project 级（workspace / Tasks / Knowledge） | 完全 | 按 `channel.project_id` 路由 |
+| Agent 身份（description） | 共享 | 设计如此，Agent 是"一个人"|
+| CLI 原生记忆（AGENTS.md）| 项目级 | CLI 自管，按 cwd 查找 |
+| 运行时副作用 | 部分隔离 | 见必须修正的坑（K-N）|
+
+### 必须修正的坑（product-brief §D-7）
+
+| # | 问题 | 对应 D-N |
+|---|------|---------|
+| K-1 | `agents.status` 单值冲突 | D-1 修订（per-channel 派生）|
+| K-2 | 链式触发计数维度 | D-6 修订（per-thread）|
+| K-3 | `agent_activity` 无 `channel_id` | D-3 修订 |
+| K-4 | env_vars 只在 Agent 级 | 待 Sprint 2 新增 `project_agent_overrides` 表 |
+| K-5 | `~/.slark/agents/{id}/` 共享 cwd | D-8 v1.0 修订（废除沙盒）|
+| K-6 | 并发池全局共享 | D-5 现状接受，Sprint 8+ 可加 per-Project 配额 |
+
+---
+
+## D-19: Team Architect 兜底三件套
+
+对齐：`product-brief.md §D-3 兜底策略（Q-2 / Review 5）`
+
+### 触发条件（任一）
+
+- 未安装 `cursor-agent`（`cursor-agent --version` 失败）
+- Team Architect spawn 超时（独立 30s 超时，不受 `PROCESS_TIMEOUT_MS` 300s 影响）
+- 返回 JSON 解析失败
+
+### 固定兜底内容
+
+```typescript
+const FALLBACK_TEAM: TeamSuggestion = {
+  agents: [
+    { name: 'Architect', role: 'Architect', description: '...', runtime: '', model: '', reasoning: 'medium' },
+    { name: 'Dev',       role: 'Developer', description: '...', runtime: '', model: '', reasoning: 'medium' },
+    { name: 'Reviewer',  role: 'Reviewer',  description: '...', runtime: '', model: '', reasoning: 'medium' },
+  ],
+  rationale: 'Default team (Team Architect unavailable). Please configure runtime/model for each agent before use.',
+};
+```
+
+### UI 表现
+
+- Create Project Step 2 仍展示三张 Agent 卡片
+- 顶部黄色警告条：`"Team Suggestion unavailable, showing default team. Please configure runtime per agent after approval."`
+- 安装引导链接：`Install cursor-agent` 指向 Cursor 官网 / IDE 内的 "Install CLI" 菜单
+- 用户 Approve 后进入 Agent Profile 必须手动选 runtime（字段为空不可 spawn）
+
+---
+
+## D-20: 四个运营闭环（锚点）
+
+对齐：`product-brief.md §5.3 四个运营闭环`
+
+### 四个 Loop 速查
+
+| Loop | 触发 | 产出 | Sprint 落地 |
+|------|------|------|-----------|
+| Onboarding | Create Project | `project_onboarding` | Sprint 6 |
+| Delivery | Workflow Run 结束 | `decisions` / `lessons` | Sprint 4 |
+| Evolution | 周期性（每 24h） | `agent_feedback` | Sprint 5 |
+| Reuse | Agent spawn 前 | ContextBuilder 注入 | Sprint 4（与 Scribe 同步）|
+
+### 关键表（Sprint 4~6 陆续落地，此处只列字段锚点）
+
+```sql
+-- Sprint 4
+CREATE TABLE decisions (...);
+CREATE TABLE lessons (
+  id, project_id, kind, title, body, audience, tags_json,
+  source_message_id, recorded_by, confidence, review_status, use_count, ...
+);
+
+-- Sprint 5
+CREATE TABLE agent_feedback (
+  id, agent_id, period_start, period_end,
+  observations, suggested_description, diff_summary,
+  applied, applied_at, approved_by, ...
+);
+
+-- Sprint 6
+CREATE TABLE project_onboarding (
+  project_id PRIMARY KEY, overview, tech_stack_json, conventions, ...
+);
+CREATE TABLE agent_skills (
+  agent_id, project_id, skill_key, touch_count, last_touched, ...
+);
+```
+
+详细字段与行为约束见 `product-brief §11 Schema 总清单` 和各 Sprint 启动前拍板的 Q-N。
+
+---
+
+## 版本历史
+
+| 版本 | 日期 | 变更 |
+|------|------|------|
+| v0 | ~2026-04-22 | 初版 D-1 ~ D-12 + O-1 ~ O-4，支撑 v0 MVP |
+| **v1.0.1** | 2026-04-23 | 对齐 `product-brief.md v1.0.1`：修订 D-1 (状态 per-channel)、D-3 (activity 加 channel_id)、D-6 (链式 per-thread)、D-8 (workspace 废除)、D-9 (seed 不预置)；新增 D-13 ~ D-20 (Project / Goal / System Agents / Workflow / Responsibilities / 隔离契约 / 兜底三件套 / 4 Loop)；O-1 / O-2 / O-4 的 Phase/MVP-N 引用改为 Sprint-N / v0 MVP |
 
