@@ -38,9 +38,9 @@ export function Layout({ children }: Props) {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // 从 URL 取当前激活项
-  const channelMatch = useMatch('/channel/:channelId');
-  const dmMatch = useMatch('/dm/:agentId');
+  // 从 URL 取当前激活项（CP8.1 — Project scope 路由）
+  const channelMatch = useMatch('/p/:projectName/channel/:channelId');
+  const dmMatch = useMatch('/p/:projectName/dm/:agentId');
 
   const autoJoinChannelId = channelMatch?.params.channelId;
 

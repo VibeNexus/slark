@@ -1,10 +1,7 @@
-import { mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
-import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { Database } from 'better-sqlite3';
 import type { ReasoningEffort, Runtime } from '@slark/shared';
-import { agentRepo, activityRepo } from '../db/repos.js';
-import { agentWorkspacePath } from '../config.js';
+import { agentRepo, agentRunRepo, activityRepo } from '../db/repos.js';
 
 export async function agentRoutes(app: FastifyInstance, db: Database): Promise<void> {
   // 列出 agent；可选 ?project_id= 过滤
@@ -39,13 +36,8 @@ export async function agentRoutes(app: FastifyInstance, db: Database): Promise<v
 
     const agent = agentRepo.create(db, body);
 
-    // 创建 workspace 目录（v0 兼容：若 agent 绑定了 Project，Project.workspace_path 会接管 cwd；
-    //                   但 ~/.slark/agents/{id} 仍保留作为 fallback 目录，D-8 最终废除在 CP6+）
-    try {
-      mkdirSync(agentWorkspacePath(agent.id), { recursive: true });
-    } catch (e) {
-      req.log.warn({ err: e }, 'failed to create agent workspace');
-    }
+    // CP8.5：D-8 v1.0 修订后 agent 不再有独立 workspace 目录。
+    // Agent cwd 取自 channel 所属 Project 的 workspace_path。
 
     reply.code(201);
     return agent;
@@ -82,7 +74,10 @@ export async function agentRoutes(app: FastifyInstance, db: Database): Promise<v
     reply.code(204);
   });
 
-  // 启动（stopped → idle）
+  // 启动 / 停止 / 重启
+  // CP8.3：agents.status 已废除，状态从 agent_runs 派生。
+  // 这些端点保留接口语义但暂不再写 agents 表；
+  // TODO Sprint 2 Workflow Runner：实际 kill agent 的活跃 runs / 处理"全局禁用"语义。
   app.post('/api/agents/:id/start', async (req, reply) => {
     const { id } = req.params as { id: string };
     const a = agentRepo.getById(db, id);
@@ -90,11 +85,9 @@ export async function agentRoutes(app: FastifyInstance, db: Database): Promise<v
       reply.code(404);
       return { error: 'agent not found' };
     }
-    agentRepo.updateStatus(db, id, 'idle');
-    return { ok: true, status: 'idle' };
+    return { ok: true };
   });
 
-  // 停止
   app.post('/api/agents/:id/stop', async (req, reply) => {
     const { id } = req.params as { id: string };
     const a = agentRepo.getById(db, id);
@@ -102,12 +95,9 @@ export async function agentRoutes(app: FastifyInstance, db: Database): Promise<v
       reply.code(404);
       return { error: 'agent not found' };
     }
-    agentRepo.updateStatus(db, id, 'stopped');
-    // TODO MVP-4: 同时 kill 正在跑的 CLI 进程
-    return { ok: true, status: 'stopped' };
+    return { ok: true };
   });
 
-  // 重启（stop + 清 workspace + start）
   app.post('/api/agents/:id/restart', async (req, reply) => {
     const { id } = req.params as { id: string };
     const a = agentRepo.getById(db, id);
@@ -115,79 +105,41 @@ export async function agentRoutes(app: FastifyInstance, db: Database): Promise<v
       reply.code(404);
       return { error: 'agent not found' };
     }
-    agentRepo.updateStatus(db, id, 'idle');
-    try {
-      rmSync(agentWorkspacePath(id), { recursive: true, force: true });
-      mkdirSync(agentWorkspacePath(id), { recursive: true });
-    } catch (e) {
-      req.log.warn({ err: e }, 'failed to reset workspace');
-    }
-    return { ok: true, status: 'idle' };
+    // CP8.5：原 v0 行为是清理 agent workspace 目录；v1.0 已废除独立 workspace。
+    // 当前 restart 是 no-op，TODO 改为 kill 该 agent 的活跃 runs。
+    return { ok: true };
   });
 
-  // Activity 日志
+  // Activity 日志（CP8.4：支持按 channel 过滤）
   app.get('/api/agents/:id/activity', async (req) => {
     const { id } = req.params as { id: string };
-    const query = req.query as { limit?: string; before?: string };
+    const query = req.query as { limit?: string; before?: string; channel_id?: string };
     const limit = query.limit ? Math.min(200, Number(query.limit)) : 50;
     const before = query.before ? Number(query.before) : undefined;
-    return activityRepo.list(db, id, limit, before);
+    return activityRepo.list(db, id, limit, before, query.channel_id);
   });
 
-  // Workspace 文件树（浅层扫描，最多 3 层）
-  app.get('/api/agents/:id/workspace', async (req, reply) => {
+  // Agent 状态（CP8.2：从 agent_runs 派生 per-channel + anyActive）
+  // 取代 v0 的 agents.status 单值字段。
+  app.get('/api/agents/:id/status', async (req, reply) => {
     const { id } = req.params as { id: string };
     const a = agentRepo.getById(db, id);
     if (!a) {
       reply.code(404);
       return { error: 'agent not found' };
     }
-    const root = agentWorkspacePath(id);
-    try {
-      return {
-        path: root,
-        tree: listDir(root, 3),
-      };
-    } catch (e) {
-      reply.code(200);
-      return { path: root, tree: [], error: (e as Error).message };
+    const activeRuns = agentRunRepo.listActiveForAgent(db, id);
+    const perChannel: Record<string, 'thinking' | 'working' | 'error' | 'stopped'> = {};
+    for (const run of activeRuns) {
+      perChannel[run.channel_id] = run.status;
     }
+    return {
+      agent_id: id,
+      per_channel: perChannel,
+      any_active: activeRuns.length > 0,
+    };
   });
-}
 
-interface FileNode {
-  name: string;
-  type: 'file' | 'dir';
-  size?: number;
-  children?: FileNode[];
-}
-
-function listDir(dir: string, depth: number): FileNode[] {
-  if (depth <= 0) return [];
-  let entries: string[];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return [];
-  }
-  const result: FileNode[] = [];
-  for (const name of entries.sort()) {
-    if (name.startsWith('.') && name !== '.well-known') continue;
-    const full = join(dir, name);
-    try {
-      const st = statSync(full);
-      if (st.isDirectory()) {
-        result.push({
-          name,
-          type: 'dir',
-          children: listDir(full, depth - 1),
-        });
-      } else {
-        result.push({ name, type: 'file', size: st.size });
-      }
-    } catch {
-      // ignore
-    }
-  }
-  return result;
+  // CP8.5：GET /api/agents/:id/workspace 已删除（D-8 v1.0 修订：agent 无独立 workspace）。
+  // 旧客户端调用会得到 404 not found（route 不存在），属期望行为。
 }

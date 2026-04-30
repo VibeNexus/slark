@@ -1,9 +1,10 @@
 import { useEffect, useMemo } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { Navigate, useParams, useSearchParams } from 'react-router-dom';
 import type { ChatMessage } from '@slark/shared';
 import { useAgentsStore } from '../stores/agents';
 import { useMessagesStore } from '../stores/messages';
 import { useChannelsStore } from '../stores/channels';
+import { useProjectsStore } from '../stores/projects';
 import { wsClient } from '../lib/ws';
 import { DMHeader } from '../components/DMHeader';
 import { MessageList } from '../components/MessageList';
@@ -13,23 +14,41 @@ import { AgentProfilePanel } from '../components/AgentProfilePanel';
 const EMPTY_MESSAGES: ChatMessage[] = [];
 
 /**
- * MVP 简化：
- *   DM 并非独立 channel type=dm，当前把 agent 接在 #general 里。
- *   真正的 DM 实现需要独立 channel_id，后续迭代补。
- *   这里 DMPage 展示同一个 #general 的消息 + 输入时直接 @此 agent。
+ * MVP 简化（CP8.1 — Project scope 路由）：
+ *   DM 并非独立 channel type=dm，当前把 agent 接在该 Project 的 #general 里。
+ *   多 Project 下 #general 必须按当前 Project 的 project_id 过滤，否则会发到错的 Project。
+ *   真正的 DM 实现需要独立 channel_id（type=dm），后续迭代补。
  *
- * (slock.ai 原版的 DM 是一个 type=dm 的 channel，内部只有 user + 该 agent)
+ * URL: /p/:projectName/dm/:agentId
  */
 export function DMPage() {
-  const { agentId } = useParams<{ agentId: string }>();
+  const { projectName, agentId } = useParams<{ projectName: string; agentId: string }>();
   const [params] = useSearchParams();
   const profileParam = params.get('profile');
   const profileAgentId = profileParam?.startsWith('agent:') ? profileParam.slice(6) : null;
   const agents = useAgentsStore((s) => s.agents);
+  const agentsLoaded = useAgentsStore((s) => s.loaded);
   const agent = agents.find((a) => a.id === agentId);
   const profileAgent = profileAgentId ? agents.find((a) => a.id === profileAgentId) : null;
   const channels = useChannelsStore((s) => s.channels);
-  const generalChannel = channels.find((c) => c.name === 'general');
+  const projects = useProjectsStore((s) => s.projects);
+
+  const project = useMemo(
+    () => projects.find((p) => p.name === projectName) ?? null,
+    [projects, projectName],
+  );
+
+  // 找当前 Project 的 #general（CP8.1：必须按 project_id 过滤）
+  const generalChannel = useMemo(() => {
+    if (!project) return null;
+    return (
+      channels.find((c) => c.name === 'general' && c.project_id === project.id) ??
+      // 兜底：如果没有 #general，就用该 Project 的第一个 type=channel
+      channels.find((c) => c.type === 'channel' && c.project_id === project.id) ??
+      null
+    );
+  }, [channels, project]);
+
   const channelId = generalChannel?.id;
 
   const byChannel = useMessagesStore((s) => s.byChannel);
@@ -52,12 +71,25 @@ export function DMPage() {
     return m;
   }, [agent]);
 
+  if (!agentsLoaded) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-text-secondary font-mono">
+        Loading…
+      </div>
+    );
+  }
+
   if (!agent) {
     return (
       <div className="flex-1 flex items-center justify-center text-text-secondary font-mono">
         Agent not found.
       </div>
     );
+  }
+
+  // 校验 agent 是否属于该 Project（CP8.1 跨 Project URL 安全）
+  if (agent.project_id && project && agent.project_id !== project.id) {
+    return <Navigate to="/" replace />;
   }
 
   // 只展示和这个 agent 相关的消息（及用户发给它的）
@@ -82,17 +114,26 @@ export function DMPage() {
   return (
     <div className="flex-1 flex min-w-0 min-h-0">
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
-        <DMHeader agent={agent} />
-        <MessageList
-          messages={filtered}
-          agentsById={agentsById}
-          streamBuffers={streamBuffers}
-          emptyHint={`Start a conversation with ${agent.name}.`}
-        />
-        <MessageInput
-          placeholder={`Message @${agent.name}`}
-          onSend={send}
-        />
+        <DMHeader agent={agent} channelId={channelId} />
+        {channelId ? (
+          <>
+            <MessageList
+              messages={filtered}
+              agentsById={agentsById}
+              streamBuffers={streamBuffers}
+              emptyHint={`Start a conversation with ${agent.name}.`}
+            />
+            <MessageInput
+              placeholder={`Message @${agent.name}`}
+              onSend={send}
+            />
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-text-secondary font-mono p-8 text-center">
+            This project has no #general channel yet. Create one from the sidebar to start
+            messaging {agent.name}.
+          </div>
+        )}
       </div>
       {profileAgent && <AgentProfilePanel agent={profileAgent} />}
     </div>

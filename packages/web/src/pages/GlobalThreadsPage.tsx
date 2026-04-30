@@ -4,6 +4,7 @@ import type { Agent, ChatMessage, Channel } from '@slark/shared';
 import { listGlobalThreads } from '../lib/api';
 import { useAgentsStore } from '../stores/agents';
 import { useChannelsStore } from '../stores/channels';
+import { channelPath } from '../lib/routes';
 import { Avatar } from '../components/Avatar';
 
 export function GlobalThreadsPage() {
@@ -52,7 +53,7 @@ export function GlobalThreadsPage() {
               agent={t.sender_id ? agentsById.get(t.sender_id) : undefined}
               channel={channelsById.get(t.channel_id)}
               onOpen={() =>
-                navigate(`/channel/${t.channel_id}?thread=${encodeURIComponent(t.id)}`)
+                navigate(`${channelPath(t.channel_id)}?thread=${encodeURIComponent(t.id)}`)
               }
             />
           ))

@@ -103,7 +103,9 @@ export const MessageContent = memo(function MessageContent({ content, isStreamin
 
   const onTaskClick = (id: string) => {
     if (channelId) {
-      navigate(`/channel/${channelId}?chatTab=tasks&task=${encodeURIComponent(id)}`);
+      // 当前已在 ChannelPage 内，URL 已是 /p/:projectName/channel/:channelId
+      // 仅切换 query 参数，相对路径修改 search 即可
+      navigate({ search: `?chatTab=tasks&task=${encodeURIComponent(id)}` });
     } else {
       navigate(`/tasks`);
     }

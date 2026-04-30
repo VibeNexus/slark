@@ -19,6 +19,5 @@ export function dbPath(): string {
   return resolve(config.slarkHome, 'slark.db');
 }
 
-export function agentWorkspacePath(agentId: string): string {
-  return resolve(config.slarkHome, 'agents', agentId);
-}
+// CP8.5：D-8 v1.0 修订后 agent 不再有独立 workspace。
+// `agentWorkspacePath` 已删除；Agent cwd 取自 `project.workspace_path`（D-13）。

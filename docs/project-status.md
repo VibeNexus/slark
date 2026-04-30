@@ -12,23 +12,30 @@
 
 | 项 | 值 |
 |---|---|
-| 当前 Sprint | **Sprint 2 — Workflow Framework**（Kickoff 中，未动工）|
+| 当前 Sprint | **Sprint 2 — Workflow Framework** |
+| 当前焦点 | **CP1 — Workflow schema + Repo + REST**（CP8 Sprint 1 收口已完成） |
 | 上一 Sprint | Sprint 1 — Foundation + Goal → AI Team（✅ 已交付，见 [`sprint1-milestone.md`](sprint1-milestone.md)） |
-| 当前分支 | `main`（与 `origin/main` 对齐） |
-| 最近提交 | `cbde398 feat(sprint1-cp7): Sprint 1 milestone doc + Team Architect spawn hardening` |
+| 当前分支 | `main` |
 | 类型检查 | ✅ pnpm typecheck 通过 |
+
+### 已完成的 Sprint 2 子任务
+
+- ✅ **CP8 — Sprint 1 收口**（路由 Project scope / WS agent_status 含 channel_id / StatusDot per-channel / 删除 `agents.status` / Activity Tab channel filter / D-8 沙盒 fallback 死代码清理）
 
 ---
 
 ## 2. 当前阻塞 / 待决议
 
-Sprint 2 启动前必须拍板：
+无 Sprint 2 启动阻塞项。
 
-| # | 议题 | 建议默认 | 状态 |
-|---|------|---------|------|
-| Q-4 | Workflow YAML 的版本控制方式 | 存 SQL 的 `definition_yaml` 字段 + 提供 Export，不引入 SQL 内 version 字段 | ⏳ **待拍板** |
+### 已决议（Sprint 2 范围）
 
-非阻塞但需关注：
+| # | 议题 | 决议 | 决议日期 |
+|---|------|------|---------|
+| Q-4 ✅ | Workflow YAML 的版本控制方式 | YAML 存 `workflows.definition_yaml` 单字段；**不引入** SQL 内 version 字段；YAML 顶部 `version: "1"` 作软声明；历史版本走 Export → 用户自己 git 管理；Sprint 2 简化为直接编辑 YAML 文本，Sprint 3 加 Import/Export | 2026-04-30 |
+
+### 后续 Sprint 待决议（不阻塞当前）
+
 - Q-5 / Q-7（System Agent token 配额、lessons 跨 Project）— Sprint 4 启动前再决议
 - Q-6（Coach rollback）— Sprint 5 启动前再决议
 - Q-8（Facilitator 触发方式）— Sprint 7 启动前再决议
@@ -51,37 +58,38 @@ CP1 ~ CP7 全部完成：
 
 ---
 
-## 4. 已知技术债（Sprint 2+ 清理）
+## 4. 已知技术债
 
-来自 Sprint 1 的延后项，按修复优先级排序：
+Sprint 1 遗留的 6 项技术债已全部在 CP8 / 文档简化中清理完成。
+
+如有新发现技术债，按以下格式新增记录。
 
 | # | 项 | 影响 | 计划清理时机 |
 |---|---|------|------------|
-| TD-1 | 路由仍是 `/channel/:id`，未切到 `/p/:projectName/channel/:id`（CP5c） | 多 Project 链接分享会混 | Sprint 2（与 Workflow thread 路由一起做） |
-| TD-2 | StatusDot 仍读 `agents.status`，未从 `agent_runs` 派生 per-channel | 多 Project 并发时状态点会跳 | Sprint 2 |
-| TD-3 | `agents.status` 字段仍双写保留 | 一处真相未确立 | TD-2 完成后一并删 |
-| TD-4 | `~/.slark/agents/{id}/` 目录与 CLIRunner fallback 仍存在（D-8 沙盒未彻底移除）| 已无业务依赖，但是死代码 | 所有 Project 都强制 workspace_path 后清理 |
-| TD-5 | Activity Tab 的 channel filter 后端已支持，UI 未暴露 | 多 Project 时 Activity 混展 | Sprint 2 顺手做 |
-| TD-6 | `README.md` / `PLAN.md` 仍有 v0 时代描述（"首次启动预置 #general"等）| 文档与实际行为不符 | **本次文档简化中处理** |
+| _（暂无）_ | | | |
 
 ---
 
 ## 5. 下一步建议
 
-按顺序执行：
+CP8 Sprint 1 收口已完成。下一步进入 Sprint 2 主体。
 
-1. **拍板 Q-4**（5 分钟决策）→ 解锁 Sprint 2
-2. 文档基线同步（本次正在做的事，PLAN/README/brief/decisions 收敛）
-3. 顺手清掉 TD-1 ~ TD-3：路由 Project scope + StatusDot per-channel 派生 + 删 `agents.status`
-4. 进入 Sprint 2 实质开发：
-   - Schema：`workflows` / `workflow_runs`
-   - YAML parser/validator + Workflow Runner
-   - 内置 3 个模板：`feature-development` / `bug-fix` / `research`
-   - `/new-feature` 等 command 触发
-   - Thread 顶部进度条
-   - `await_approval` step 最小暂停/继续（完整批准流见 Sprint 3）
+### CP1 ~ CP5 — Sprint 2 主体（6~8 天）
 
-详细 Sprint 2 范围与验收见 [`PLAN.md` Sprint 2](../PLAN.md#sprint-2-workflow-framework甬道落地---template-路径)。
+1. **CP1** Workflow schema + Repo + REST（1 天）
+   - `workflows` / `workflow_runs` 两张表
+   - REST：`GET/POST/PATCH/DELETE /api/projects/:id/workflows`、`GET /api/workflow-runs/:id`、`POST /api/workflow-runs/:id/abort`
+2. **CP2** YAML Parser + 3 内置模板（1.5 天）
+   - parser/validator + 3 内置模板（feature-development / bug-fix / research）
+   - 模板首次进入 Project 自动 import
+3. **CP3** Workflow Runner 核心（2~3 天，最重）
+   - 状态机：running / completed / aborted / failed
+   - 单步执行 → 等结果 → 推进下一步
+   - `await_approval` 最小暂停/继续（完整批准流见 Sprint 3）
+4. **CP4** `/command` 触发 + Thread 进度条可视化（1.5 天）
+5. **CP5** 多 Project 隔离 + Sprint 2 milestone 文档（0.5 天）
+
+详细范围与验收见 [`PLAN.md` Sprint 2](../PLAN.md#sprint-2-workflow-framework当前焦点)。
 
 ---
 

@@ -8,6 +8,7 @@ import type { ChatMessage } from '@slark/shared';
 import { searchMessages } from '../lib/api';
 import { useAgentsStore } from '../stores/agents';
 import { useChannelsStore } from '../stores/channels';
+import { channelPath } from '../lib/routes';
 import { Dialog } from './Dialog';
 
 interface Props {
@@ -57,10 +58,11 @@ export function SearchDialog({ open, onClose }: Props) {
   }, [q, open]);
 
   const openResult = (m: ChatMessage) => {
+    const base = channelPath(m.channel_id);
     if (m.parent_id) {
-      navigate(`/channel/${m.channel_id}?thread=${encodeURIComponent(m.parent_id)}`);
+      navigate(`${base}?thread=${encodeURIComponent(m.parent_id)}`);
     } else {
-      navigate(`/channel/${m.channel_id}`);
+      navigate(base);
     }
     onClose();
   };

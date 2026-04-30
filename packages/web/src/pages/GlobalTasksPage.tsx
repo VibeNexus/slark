@@ -5,11 +5,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { Task, TaskStatus } from '@slark/shared';
+import type { Agent, Channel, Task, TaskStatus } from '@slark/shared';
 import { cn } from '../lib/cn';
 import { listTasks } from '../lib/api';
 import { useAgentsStore } from '../stores/agents';
 import { useChannelsStore } from '../stores/channels';
+import { channelPath } from '../lib/routes';
 
 const COLUMNS: { key: TaskStatus; label: string; bg: string }[] = [
   { key: 'todo', label: 'TODO', bg: 'bg-accent-orange' },
@@ -102,8 +103,8 @@ function BoardView({
   channelsById,
 }: {
   tasks: Task[];
-  agentsById: Map<string, import('@slark/shared').Agent>;
-  channelsById: Map<string, import('@slark/shared').Channel>;
+  agentsById: Map<string, Agent>;
+  channelsById: Map<string, Channel>;
 }) {
   const grouped = useMemo(() => {
     const g: Record<TaskStatus, Task[]> = { todo: [], in_progress: [], in_review: [], done: [] };
@@ -157,8 +158,8 @@ function ListView({
   channelsById,
 }: {
   tasks: Task[];
-  agentsById: Map<string, import('@slark/shared').Agent>;
-  channelsById: Map<string, import('@slark/shared').Channel>;
+  agentsById: Map<string, Agent>;
+  channelsById: Map<string, Channel>;
 }) {
   const navigate = useNavigate();
   return (
@@ -175,7 +176,7 @@ function ListView({
         return (
           <button
             key={t.id}
-            onClick={() => navigate(`/channel/${t.channel_id}?chatTab=tasks`)}
+            onClick={() => navigate(`${channelPath(t.channel_id)}?chatTab=tasks`)}
             className="w-full flex items-center gap-2 p-2 border-2 border-black rounded bg-bg-card text-left hover:bg-bg-main"
           >
             <span className="font-mono text-xs text-text-secondary">
@@ -205,13 +206,13 @@ function TaskCard({
   channel,
 }: {
   task: Task;
-  agent?: import('@slark/shared').Agent;
-  channel?: import('@slark/shared').Channel;
+  agent?: Agent;
+  channel?: Channel;
 }) {
   const navigate = useNavigate();
   return (
     <button
-      onClick={() => navigate(`/channel/${task.channel_id}?chatTab=tasks`)}
+      onClick={() => navigate(`${channelPath(task.channel_id)}?chatTab=tasks`)}
       className="w-full text-left border-2 border-black rounded bg-bg-card p-2 hover:bg-bg-main"
     >
       <div className="flex items-center gap-1 text-[10px] font-mono text-text-secondary mb-1">

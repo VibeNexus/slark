@@ -1,5 +1,6 @@
 import type { AgentStatus } from '@slark/shared';
 import { cn } from '../lib/cn';
+import { useAgentsStore } from '../stores/agents';
 
 const COLOR_VAR: Record<AgentStatus, string> = {
   idle: 'var(--color-status-online)',
@@ -38,4 +39,32 @@ export function StatusDot({ status, size = 'sm', className, animated = true }: P
 
 export function statusLabel(status: AgentStatus): string {
   return TEXT_LABEL[status];
+}
+
+/**
+ * AgentStatusDot — 订阅 store 派生状态
+ *
+ * CP8.3：StatusDot 完全派生自 `agent_runs` 表的 per-channel run（agents.status 已废除）。
+ *   - 不传 channelId：取"任意 channel 活跃"的最高优先级状态（Sidebar 用）
+ *   - 传 channelId：优先显示该 channel 的 run 状态；无活跃 run 时回落 'idle'
+ */
+export function AgentStatusDot({
+  agentId,
+  channelId,
+  size = 'xs',
+  className,
+}: {
+  agentId: string;
+  channelId?: string;
+  size?: 'xs' | 'sm';
+  className?: string;
+}) {
+  const status = useAgentsStore((s) => {
+    if (channelId) {
+      const perChannel = s.getChannelRunStatus(agentId, channelId);
+      if (perChannel) return perChannel as AgentStatus;
+    }
+    return s.getDerivedStatus(agentId);
+  });
+  return <StatusDot status={status} size={size} className={className} />;
 }

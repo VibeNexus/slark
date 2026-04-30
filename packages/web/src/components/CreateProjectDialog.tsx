@@ -24,6 +24,7 @@ import { useChannelsStore } from '../stores/channels';
 import { useAgentsStore } from '../stores/agents';
 import { useProjectsStore } from '../stores/projects';
 import { cn } from '../lib/cn';
+import { projectChannelPath } from '../lib/routes';
 import { Dialog } from './Dialog';
 
 interface Props {
@@ -159,9 +160,9 @@ export function CreateProjectDialog({ open, onClose }: Props) {
       // 4. 把 Agents 加入 #general channel
       await Promise.all(createdAgents.map((a) => joinChannel(channel.id, a.id)));
 
-      // 5. 切换到新 Project 并导航到 channel
+      // 5. 切换到新 Project 并导航到 channel（CP8.1 — Project scope 路由）
       useProjectsStore.getState().setCurrent(project.id);
-      navigate(`/channel/${channel.id}`);
+      navigate(projectChannelPath(project.name, channel.id));
       reset();
       onClose();
     } catch (e) {

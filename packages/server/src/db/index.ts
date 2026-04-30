@@ -4,6 +4,7 @@
  * Schema 版本：
  *   1 - v0 MVP 初始 schema（channels / agents / messages / tasks / agent_activity / meta 等）
  *   2 - v1.0 Sprint 1 CP1/CP3：新增 projects / agent_runs 表、agent_activity 加 channel_id 列
+ *   3 - v1.0 Sprint 2 CP8.3：删除 agents.status 字段（状态从 agent_runs 派生，对齐 D-1）
  */
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -21,7 +22,7 @@ const SCHEMA_CANDIDATES = [
 ];
 const SCHEMA_PATH = SCHEMA_CANDIDATES.find((p) => existsSync(p));
 
-const CURRENT_SCHEMA_VERSION = '2';
+const CURRENT_SCHEMA_VERSION = '3';
 
 let _db: DB | null = null;
 
@@ -78,11 +79,21 @@ function migrate(db: DB): void {
   ensureColumn(db, 'agent_activity', 'channel_id', 'TEXT');
   ensureColumn(db, 'channels', 'project_id', 'TEXT');
   ensureColumn(db, 'agents', 'project_id', 'TEXT');
+  // CP8.3：从旧 db（v0 / v1.0.0~v1.0.1）删除 agents.status 字段
+  // 状态改由 agent_runs 表派生，详见 docs/technical-decisions.md D-1。
+  dropColumnIfExists(db, 'agents', 'status');
 }
 
 function ensureColumn(db: DB, table: string, column: string, definition: string): void {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
   if (!cols.some((c) => c.name === column)) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+function dropColumnIfExists(db: DB, table: string, column: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
   }
 }

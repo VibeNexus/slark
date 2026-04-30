@@ -8,7 +8,6 @@
  */
 
 import type {
-  AgentStatus,
   ReasoningEffort,
   Runtime,
   SenderType,
@@ -62,12 +61,9 @@ export interface Agent {
   reasoning: ReasoningEffort | null;
   env_vars: Record<string, string>;
   /**
-   * v0 遗留单值字段。v1.0 已定 per-channel 派生（D-1 修订），CP3 将移除。
-   * 在 v1.0.1 过渡期仍有 status 字段以保持前端兼容。
-   */
-  status: AgentStatus;
-  /**
-   * v1.0 新增：归属 Project（D-13）。CP2 之后会强制 NOT NULL。
+   * v1.0 新增：归属 Project（D-13）。
+   * 注：CP8.3 起 `agents.status` 字段已从 schema 移除；状态从 agent_runs 表派生。
+   * 前端通过 GET /api/agents/:id/status 或 WS agent_status 事件获取实时状态。
    */
   project_id?: string | null;
   created_at: number;

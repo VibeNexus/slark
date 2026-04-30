@@ -102,13 +102,12 @@ export async function channelRoutes(app: FastifyInstance, db: Database): Promise
     reply.code(204);
   });
 
-  // Stop all agents in channel（MVP-4 接入 Agent Engine 后有实际停止效果）
+  // Stop all agents in channel
+  // CP8.3：agents.status 已废除；本端点暂时只返回 channel 内 agent 数量。
+  // TODO Sprint 2 Workflow Runner：实际 kill 该 channel 内活跃的 agent_runs（agentRunRepo.listActiveInChannel + CLIRunner.abort）。
   app.post('/api/channels/:id/stop-all', async (req) => {
     const { id } = req.params as { id: string };
     const agents = agentRepo.listInChannel(db, id);
-    for (const a of agents) {
-      agentRepo.updateStatus(db, a.id, 'stopped');
-    }
     return { stopped: agents.length };
   });
 }

@@ -23,7 +23,6 @@ import type {
   Task,
 } from '@slark/shared';
 import type {
-  AgentStatus,
   ReasoningEffort,
   Runtime,
   SenderType,
@@ -269,7 +268,6 @@ interface AgentRow {
   model: string | null;
   reasoning: string | null;
   env_vars_json: string | null;
-  status: string;
   project_id: string | null;
   created_at: number;
 }
@@ -284,7 +282,6 @@ function rowToAgent(r: AgentRow): Agent {
     model: r.model,
     reasoning: r.reasoning as ReasoningEffort | null,
     env_vars: r.env_vars_json ? (JSON.parse(r.env_vars_json) as Record<string, string>) : {},
-    status: r.status as AgentStatus,
     project_id: r.project_id,
     created_at: r.created_at,
   };
@@ -323,8 +320,8 @@ export const agentRepo = {
     const id = input.id ?? nanoid();
     const ts = now();
     db.prepare(
-      `INSERT INTO agents (id, name, avatar, description, runtime, model, reasoning, env_vars_json, status, project_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?)`,
+      `INSERT INTO agents (id, name, avatar, description, runtime, model, reasoning, env_vars_json, project_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       input.name,
@@ -346,7 +343,6 @@ export const agentRepo = {
       model: input.model ?? null,
       reasoning: input.reasoning ?? null,
       env_vars: input.env_vars ?? {},
-      status: 'idle',
       project_id: input.project_id ?? null,
       created_at: ts,
     };
@@ -396,18 +392,11 @@ export const agentRepo = {
       fields.push('env_vars_json = ?');
       values.push(JSON.stringify(patch.env_vars));
     }
-    if (patch.status !== undefined) {
-      fields.push('status = ?');
-      values.push(patch.status);
-    }
+    // CP8.3：agents.status 字段已删除；状态从 agent_runs 派生
     if (!fields.length) return this.getById(db, id);
     values.push(id);
     db.prepare(`UPDATE agents SET ${fields.join(', ')} WHERE id = ?`).run(...values);
     return this.getById(db, id);
-  },
-
-  updateStatus(db: Database, id: string, status: AgentStatus): void {
-    db.prepare('UPDATE agents SET status = ? WHERE id = ?').run(status, id);
   },
 
   remove(db: Database, id: string): void {

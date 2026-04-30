@@ -16,12 +16,10 @@
  *   7. 返回完整文本 & metadata（供 Message Router 继续链式触发解析）
  */
 
-import { mkdirSync } from 'node:fs';
 import type { Database } from 'better-sqlite3';
 import type { AgentStatus, ChatMessage, MessageMetadata, Runtime } from '@slark/shared';
 import { LOCAL_USER_ID } from '@slark/shared';
 import { agentRepo, agentRunRepo, channelRepo, messageRepo, projectRepo } from '../db/repos.js';
-import { agentWorkspacePath } from '../config.js';
 import { hub } from '../ws/hub.js';
 import { buildContext } from './context-builder.js';
 import { ActivityRecorder } from './activity-recorder.js';
@@ -89,15 +87,8 @@ export async function triggerAgent(
     };
   }
 
-  if (agent.status === 'stopped') {
-    return {
-      agentReplyMessage: null as unknown as ChatMessage,
-      fullText: '',
-      duration_ms: 0,
-      ok: false,
-      errorMessage: `agent ${agent.name} is stopped`,
-    };
-  }
+  // CP8.3：v1.0 模型下 agent 没有"全局 stopped"概念，run 状态完全由 agent_runs 表派生。
+  // 如未来需要"禁用某 agent"，应新增独立 disabled 字段而非复用 status。
 
   const adapter = getAdapterFor(agent.runtime);
   if (!adapter) {
@@ -160,16 +151,33 @@ export async function triggerAgent(
   hub.broadcast(ctx.channelId, { type: 'message', message: placeholder });
 
   // 3. 启动 agent_run（v1.0 per-channel status 派生，D-1 / D-18）
-  //    同步写入 agents.status（v0 前端兼容，CP5 移除）
+  //    CP8.3 起仅记录 agent_runs，不再双写 agents.status。
   const run = agentRunRepo.start(db, {
     agent_id: agent.id,
     channel_id: ctx.channelId,
     status: 'thinking',
   });
-  updateAgentStatus(db, agent.id, 'thinking', ctx.channelId);
+  broadcastAgentStatus(agent.id, 'thinking', ctx.channelId);
 
-  // 4. cwd 解析（D-8 v1.0 修订）：优先 project.workspace_path，老数据回退沙盒
-  const cwd = resolveCwd(db, channel?.project_id ?? null, agent.id, log);
+  // 4. cwd 解析（D-8 v1.0 终态）：必须有 project.workspace_path，否则报错
+  let cwd: string;
+  try {
+    cwd = resolveCwd(db, channel?.project_id ?? null, ctx.channelId);
+  } catch (e) {
+    const errMsg = (e as Error).message;
+    log.warn(`[engine] resolveCwd failed: ${errMsg}`);
+    agentRunRepo.end(db, run.id, errMsg);
+    broadcastAgentStatus(agent.id, 'error', ctx.channelId);
+    finalizeError(db, placeholder, errMsg);
+    emitSystemError(db, ctx.channelId, agent.name, errMsg);
+    return {
+      agentReplyMessage: placeholder,
+      fullText: '',
+      duration_ms: 0,
+      ok: false,
+      errorMessage: errMsg,
+    };
+  }
 
   // 5. 并发队列 + spawn
   const activity = new ActivityRecorder(db, agent.id, ctx.channelId);
@@ -204,7 +212,7 @@ export async function triggerAgent(
           ) {
             hasSwitchedToWorking = true;
             agentRunRepo.updateStatus(db, run.id, 'working');
-            updateAgentStatus(db, agent.id, 'working', ctx.channelId);
+            broadcastAgentStatus(agent.id, 'working', ctx.channelId);
           }
 
           // 流式文本 → 广播 message_stream
@@ -235,7 +243,7 @@ export async function triggerAgent(
   // 6. 队列满
   if (!runResult.ok) {
     agentRunRepo.end(db, run.id, 'queue_full');
-    updateAgentStatus(db, agent.id, 'error', ctx.channelId);
+    broadcastAgentStatus(agent.id, 'error', ctx.channelId);
     const errMsg = 'Too many concurrent requests. Please try again later.';
     finalizeError(db, placeholder, errMsg);
     emitSystemError(db, ctx.channelId, agent.name, errMsg);
@@ -287,15 +295,15 @@ export async function triggerAgent(
     metadata: finalMetadata,
   });
 
-  // 8. 最终状态（v1.0: agent_runs end + v0 agents.status 双写）
+  // 8. 最终状态（CP8.3：仅 agent_runs 表是事实来源；WS 广播给前端派生）
   if (finalOk) {
     agentRunRepo.end(db, run.id);
-    updateAgentStatus(db, agent.id, 'idle', ctx.channelId);
+    broadcastAgentStatus(agent.id, 'idle', ctx.channelId);
   } else {
     const errEvent = result.events.find((e) => e.type === 'error');
     const errMsg = errEvent && 'message' in errEvent ? errEvent.message : 'Unknown error';
     agentRunRepo.end(db, run.id, errMsg);
-    updateAgentStatus(db, agent.id, 'error', ctx.channelId);
+    broadcastAgentStatus(agent.id, 'error', ctx.channelId);
     emitSystemError(db, ctx.channelId, agent.name, errMsg);
   }
 
@@ -316,14 +324,17 @@ export async function triggerAgent(
 // Helpers
 // =============================================================================
 
-function updateAgentStatus(
-  db: Database,
+/**
+ * 广播 agent 状态变更（CP8.3）
+ *
+ * 仅 emit WebSocket 事件；不再写 agents.status（字段已删除，状态从 agent_runs 派生）。
+ * 前端通过 ws-bridge 接收事件并维护 per-channel run map（D-1 / D-18）。
+ */
+function broadcastAgentStatus(
   agentId: string,
   status: AgentStatus,
   channelId: string,
 ): void {
-  agentRepo.updateStatus(db, agentId, status);
-  // v1.0: agent_status 事件携带 channel_id，前端可派生 per-channel 显示（D-1 / D-18）
   hub.broadcast(channelId, {
     type: 'agent_status',
     agent_id: agentId,
@@ -333,32 +344,23 @@ function updateAgentStatus(
 }
 
 /**
- * 解析 Agent spawn 的工作目录（D-8 v1.0 修订）：
+ * 解析 Agent spawn 的工作目录（D-8 v1.0 终态，CP8.5 移除沙盒 fallback）：
  *   - 若 channel 绑定 Project 且 Project 有 workspace_path → 使用之
- *   - 否则（纯 v0 数据路径）回退到 ~/.slark/agents/{id}/ 老沙盒 + 创建目录
- *
- * v1.0 最终目标是彻底移除回退分支（Sprint 1 CP5 随 Create Project 流程完成强制绑定）。
+ *   - 否则抛错（v1.0 起所有 channel 必须归属 Project；旧 v0 channel 已无运行时支持）
  */
-function resolveCwd(
-  db: Database,
-  projectId: string | null,
-  agentId: string,
-  log: { warn: (msg: string) => void },
-): string {
-  if (projectId) {
-    const project = projectRepo.getById(db, projectId);
-    if (project?.workspace_path) {
-      return project.workspace_path;
-    }
+function resolveCwd(db: Database, projectId: string | null, channelId: string): string {
+  if (!projectId) {
+    throw new Error(
+      `channel ${channelId} has no project_id; v1.0 requires every channel to belong to a Project (D-13). Recreate the channel via Create Project flow.`,
+    );
   }
-  // 回退：v0 沙盒路径，保证 v0 数据继续可用
-  const fallback = agentWorkspacePath(agentId);
-  try {
-    mkdirSync(fallback, { recursive: true });
-  } catch (e) {
-    log.warn(`failed to ensure fallback workspace: ${(e as Error).message}`);
+  const project = projectRepo.getById(db, projectId);
+  if (!project?.workspace_path) {
+    throw new Error(
+      `project ${projectId} has no workspace_path; cannot spawn agent (D-13).`,
+    );
   }
-  return fallback;
+  return project.workspace_path;
 }
 
 function emitSystemError(

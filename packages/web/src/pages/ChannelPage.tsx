@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { ChatMessage } from '@slark/shared';
 import { useChannelsStore } from '../stores/channels';
 import { useAgentsStore } from '../stores/agents';
+import { useProjectsStore } from '../stores/projects';
 import { useMessagesStore } from '../stores/messages';
 import { wsClient } from '../lib/ws';
 import { stopAllAgents } from '../lib/api';
+import { projectChannelPath, projectIndexPath } from '../lib/routes';
 import { ChannelHeader } from '../components/ChannelHeader';
 import { MessageList } from '../components/MessageList';
 import { MessageInput } from '../components/MessageInput';
@@ -18,15 +20,18 @@ import { ChannelSettingsDialog } from '../components/ChannelSettingsDialog';
 const EMPTY_MESSAGES: ChatMessage[] = [];
 
 export function ChannelPage() {
-  const { channelId } = useParams<{ channelId: string }>();
+  const { projectName, channelId } = useParams<{ projectName: string; channelId: string }>();
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
   const threadId = params.get('thread');
   const chatTab = (params.get('chatTab') ?? 'chat') as 'chat' | 'tasks';
   const profileParam = params.get('profile'); // 形如 "agent:{id}"
   const profileAgentId = profileParam?.startsWith('agent:') ? profileParam.slice(6) : null;
   const channels = useChannelsStore((s) => s.channels);
+  const channelsLoaded = useChannelsStore((s) => s.loaded);
   const allAgents = useAgentsStore((s) => s.agents);
   const profileAgent = profileAgentId ? allAgents.find((a) => a.id === profileAgentId) : null;
+  const projects = useProjectsStore((s) => s.projects);
   // 关键：selector 返回稳定引用（不在 selector 里创建新数组），避免 re-render 循环
   const byChannel = useMessagesStore((s) => s.byChannel);
   const messages = channelId ? byChannel.get(channelId) ?? EMPTY_MESSAGES : EMPTY_MESSAGES;
@@ -56,13 +61,37 @@ export function ChannelPage() {
     [allAgents],
   );
 
-  if (!channelId) return null;
+  if (!channelId || !projectName) return null;
+
+  // 等 channels 加载完再判断 not-found，避免刷新时闪一下错误页
+  if (!channelsLoaded) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-text-secondary font-mono">
+        Loading…
+      </div>
+    );
+  }
+
   if (!channel) {
     return (
       <div className="flex-1 flex items-center justify-center text-text-secondary font-mono">
         Channel not found.
       </div>
     );
+  }
+
+  // 校验 channel 是否属于 URL 中的 project（CP8.1 跨 Project URL 安全）
+  // v0 兼容数据可能 channel.project_id 为 null，此时不强制校验
+  if (channel.project_id) {
+    const project = projects.find((p) => p.name === projectName);
+    if (!project || channel.project_id !== project.id) {
+      // channel 不属于该 project：跳到该 channel 自己的 project
+      const realProject = projects.find((p) => p.id === channel.project_id);
+      if (realProject) {
+        return <Navigate to={projectChannelPath(realProject.name, channel.id)} replace />;
+      }
+      return <Navigate to="/" replace />;
+    }
   }
 
   const channelAgents = allAgents.filter(() => true); // 简化：显示全部 agent 数量（TODO: 真正按 channel）
@@ -138,8 +167,8 @@ export function ChannelPage() {
         onUpdated={(c) => upsertChannel(c)}
         onDeleted={(id) => {
           removeChannel(id);
-          // 删除后返回主页
-          window.location.href = '/';
+          // 删除后回到 Project index（自动跳到下一个 channel）
+          navigate(projectIndexPath(projectName));
         }}
       />
     </div>

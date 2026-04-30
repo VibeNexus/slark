@@ -142,12 +142,18 @@ export const stopAgent = (id: string) =>
   request<{ ok: boolean }>(`/api/agents/${id}/stop`, { method: 'POST' });
 export const restartAgent = (id: string) =>
   request<{ ok: boolean }>(`/api/agents/${id}/restart`, { method: 'POST' });
-export const getAgentActivity = (id: string) =>
-  request<AgentActivity[]>(`/api/agents/${id}/activity`);
-export const getAgentWorkspace = (id: string) =>
-  request<{ path: string; tree: Array<{ name: string; type: string }> }>(
-    `/api/agents/${id}/workspace`,
-  );
+export const getAgentActivity = (
+  id: string,
+  opts?: { channel_id?: string; limit?: number },
+) => {
+  const qs = new URLSearchParams();
+  if (opts?.channel_id) qs.set('channel_id', opts.channel_id);
+  if (opts?.limit) qs.set('limit', String(opts.limit));
+  const q = qs.toString();
+  return request<AgentActivity[]>(`/api/agents/${id}/activity${q ? `?${q}` : ''}`);
+};
+// CP8.5：getAgentWorkspace 已删除（D-8 v1.0 修订：agent 无独立 workspace）。
+// 旧前端组件如 AgentProfilePanel 的 WORKSPACE Tab 已在 CP6 中删除。
 export const joinChannel = (channelId: string, agentId: string) =>
   request<{ ok: boolean }>(`/api/channels/${channelId}/agents`, {
     method: 'POST',

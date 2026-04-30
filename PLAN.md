@@ -205,14 +205,16 @@ CREATE TABLE workflow_runs (
 - [ ] `await_approval` step 的最小暂停/继续 UI（完整批准流见 Sprint 3）
 - [ ] Channel 输入框 `/` 触发 command 提示（基础版）
 
-### 2.4 Sprint 1 收口（一并清理）
+### 2.4 Sprint 1 收口（CP8 — 已完成 ✅）
 
-详见 [`docs/project-status.md`](docs/project-status.md) §4 TD-1 ~ TD-3 / TD-5：
+CP8.1 ~ CP8.5 已交付：
 
-- [ ] 路由切到 `/p/:projectName/channel/:channelId`（CP5c）
-- [ ] StatusDot 改为从 `agent_runs` 派生 per-channel 状态
-- [ ] 删除 `agents.status` 字段（TD-2 完成后）
-- [ ] Activity Tab 暴露 channel filter UI
+- [x] CP8.1 路由切到 `/p/:projectName/channel/:channelId`
+- [x] CP8.2 WS `agent_status` 加 `channel_id` + `GET /api/agents/:id/status` 派生端点
+- [x] CP8.2 前端 StatusDot 从 `agent_runs` per-channel 派生
+- [x] CP8.3 删除 `agents.status` 字段 + Engine 双写移除（schema 升至 v3）
+- [x] CP8.4 Activity Tab 暴露 channel filter UI
+- [x] CP8.5 D-8 沙盒 fallback 死代码清理（`~/.slark/agents/{id}/` 不再创建；resolveCwd 必须有 project.workspace_path）
 
 ### 2.5 验收
 

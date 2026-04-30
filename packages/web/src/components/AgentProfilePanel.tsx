@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import type { Agent, AgentActivity } from '@slark/shared';
+import type { Agent, AgentActivity, AgentStatus } from '@slark/shared';
 import { cn } from '../lib/cn';
 import {
   deleteAgent,
@@ -22,8 +22,11 @@ import {
   updateAgent,
 } from '../lib/api';
 import { useAgentsStore } from '../stores/agents';
+import { useChannelsStore } from '../stores/channels';
+import { useProjectsStore } from '../stores/projects';
+import { dmPath } from '../lib/routes';
 import { Avatar } from './Avatar';
-import { StatusDot, statusLabel } from './StatusDot';
+import { AgentStatusDot, StatusDot, statusLabel } from './StatusDot';
 import { InlineEdit } from './InlineEdit';
 
 interface Props {
@@ -61,7 +64,7 @@ export function AgentProfilePanel({ agent }: Props) {
       removeFromStore(agent.id);
       close();
     },
-    message: () => navigate(`/dm/${agent.id}`),
+    message: () => navigate(dmPath(agent.id)),
   };
 
   return (
@@ -130,6 +133,8 @@ function ProfileTab({
   onRestart: () => void | Promise<unknown>;
 }) {
   const upsertAgent = useAgentsStore((s) => s.upsert);
+  // CP8.2：派生 status（任意 channel 活跃 → 该 run 状态；否则用 agent.status）
+  const derivedStatus = useAgentsStore((s) => s.getDerivedStatus(agent.id));
 
   const saveName = async (v: string) => {
     if (!v) return;
@@ -153,8 +158,8 @@ function ProfileTab({
         <div className="flex-1 min-w-0">
           <div className="font-bold text-lg">{agent.name}</div>
           <div className="flex items-center gap-2 text-sm">
-            <StatusDot status={agent.status} size="xs" />
-            <span className="font-mono text-text-secondary">{statusLabel(agent.status)}</span>
+            <AgentStatusDot agentId={agent.id} size="xs" />
+            <span className="font-mono text-text-secondary">{statusLabel(derivedStatus)}</span>
           </div>
           <div className="text-sm font-mono text-text-secondary mt-0.5">@{agent.name}</div>
         </div>
@@ -261,11 +266,23 @@ function ProfileTab({
 function ActivityTab({ agent }: { agent: Agent }) {
   const [items, setItems] = useState<AgentActivity[]>([]);
   const [loading, setLoading] = useState(true);
+  // CP8.4：channel filter UI
+  const [channelFilter, setChannelFilter] = useState<string>('');
+  const channels = useChannelsStore((s) => s.channels);
+  const projects = useProjectsStore((s) => s.projects);
+
+  // 过滤出该 Agent 所属 Project 的 channels（若 agent.project_id 已知）
+  const visibleChannels = (() => {
+    if (!agent.project_id) return channels;
+    return channels.filter((c) => !c.project_id || c.project_id === agent.project_id);
+  })();
 
   const load = async () => {
     setLoading(true);
     try {
-      const list = await getAgentActivity(agent.id);
+      const list = await getAgentActivity(agent.id, {
+        channel_id: channelFilter || undefined,
+      });
       setItems(list);
     } finally {
       setLoading(false);
@@ -276,39 +293,81 @@ function ActivityTab({ agent }: { agent: Agent }) {
     void load();
     const t = setInterval(() => void load(), 3000);
     return () => clearInterval(t);
-  }, [agent.id]);
+    // 依赖 channelFilter 切换时重新拉取
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent.id, channelFilter]);
+
+  const filterBar = (
+    <div className="px-4 py-2 border-b-2 border-black bg-bg-card flex items-center gap-2">
+      <label className="text-[11px] font-mono uppercase text-text-secondary">Channel:</label>
+      <select
+        value={channelFilter}
+        onChange={(e) => setChannelFilter(e.target.value)}
+        className="flex-1 px-2 py-1 border-2 border-black rounded bg-bg-card text-xs font-mono"
+      >
+        <option value="">All channels</option>
+        {visibleChannels.map((c) => (
+          <option key={c.id} value={c.id}>
+            # {c.name}
+            {c.project_id && projects.length > 1
+              ? ` (${projects.find((p) => p.id === c.project_id)?.name ?? '-'})`
+              : ''}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 
   if (loading && items.length === 0) {
-    return <div className="p-4 text-text-secondary font-mono text-sm">Loading...</div>;
+    return (
+      <>
+        {filterBar}
+        <div className="p-4 text-text-secondary font-mono text-sm">Loading...</div>
+      </>
+    );
   }
 
   if (items.length === 0) {
     return (
-      <div className="p-8 text-center text-text-secondary font-mono text-sm">
-        No activity yet. Start the agent to see its activity log.
-      </div>
+      <>
+        {filterBar}
+        <div className="p-8 text-center text-text-secondary font-mono text-sm">
+          No activity yet{channelFilter ? ' in this channel' : ''}. Start the agent to see its
+          activity log.
+        </div>
+      </>
     );
   }
 
   return (
-    <div className="p-4 space-y-2">
-      {items.map((a) => (
-        <div key={a.id} className="flex gap-3 py-1 border-b border-black/10 last:border-0">
-          <span className="text-[10px] font-mono text-text-secondary mt-0.5">
-            {new Date(a.created_at).toLocaleTimeString()}
-          </span>
-          <StatusDot status={mapActivityType(a.type)} size="xs" className="mt-1.5" animated={false} />
-          <div className="flex-1 min-w-0">
-            <div className="text-xs font-mono uppercase text-text-secondary">{a.type}</div>
-            <div className="text-xs">{a.detail}</div>
+    <>
+      {filterBar}
+      <div className="p-4 space-y-2">
+        {items.map((a) => (
+          <div key={a.id} className="flex gap-3 py-1 border-b border-black/10 last:border-0">
+            <span className="text-[10px] font-mono text-text-secondary mt-0.5">
+              {new Date(a.created_at).toLocaleTimeString()}
+            </span>
+            <StatusDot status={mapActivityType(a.type)} size="xs" className="mt-1.5" animated={false} />
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-mono uppercase text-text-secondary">
+                {a.type}
+                {!channelFilter && a.channel_id && (
+                  <span className="ml-2 normal-case text-text-muted">
+                    in #{channels.find((c) => c.id === a.channel_id)?.name ?? a.channel_id.slice(0, 6)}
+                  </span>
+                )}
+              </div>
+              <div className="text-xs">{a.detail}</div>
+            </div>
           </div>
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+    </>
   );
 }
 
-function mapActivityType(t: AgentActivity['type']): import('@slark/shared').AgentStatus {
+function mapActivityType(t: AgentActivity['type']): AgentStatus {
   if (t === 'thinking') return 'thinking';
   if (t === 'working') return 'working';
   if (t === 'idle') return 'idle';

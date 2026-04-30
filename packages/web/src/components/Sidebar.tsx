@@ -12,8 +12,14 @@ import { useEffect, useRef, useState } from 'react';
 import { NavLink, useSearchParams, useNavigate } from 'react-router-dom';
 import type { Agent, Channel, Project } from '@slark/shared';
 import { cn } from '../lib/cn';
+import {
+  projectAgentProfilePath,
+  projectChannelPath,
+  projectDmPath,
+  projectIndexPath,
+} from '../lib/routes';
 import { Avatar } from './Avatar';
-import { StatusDot } from './StatusDot';
+import { AgentStatusDot } from './StatusDot';
 
 interface Props {
   channels: Channel[];
@@ -87,13 +93,18 @@ export function Sidebar({
           <ChatTabContent
             channels={channels}
             agents={agents}
+            currentProject={currentProject}
             currentChannelId={currentChannelId}
             currentDmAgentId={currentDmAgentId}
             onCreateChannel={onCreateChannel}
             onOpenSearch={onOpenSearch}
           />
         ) : (
-          <MembersTabContent agents={agents} onCreateAgent={onCreateAgent} />
+          <MembersTabContent
+            agents={agents}
+            currentProject={currentProject}
+            onCreateAgent={onCreateAgent}
+          />
         )}
       </div>
 
@@ -208,6 +219,7 @@ function NavItem({
 function ChatTabContent({
   channels,
   agents,
+  currentProject,
   currentChannelId,
   currentDmAgentId,
   onCreateChannel,
@@ -215,12 +227,14 @@ function ChatTabContent({
 }: {
   channels: Channel[];
   agents: Agent[];
+  currentProject: Project | null;
   currentChannelId?: string;
   currentDmAgentId?: string;
   onCreateChannel?: () => void;
   onOpenSearch?: () => void;
 }) {
   const publicChannels = channels.filter((c) => c.type === 'channel');
+  const projectName = currentProject?.name;
 
   return (
     <div className="pb-3">
@@ -237,7 +251,7 @@ function ChatTabContent({
       {publicChannels.map((ch) => (
         <NavItem
           key={ch.id}
-          to={`/channel/${ch.id}`}
+          to={projectName ? projectChannelPath(projectName, ch.id) : '/'}
           icon={<span className="font-bold">#</span>}
           label={ch.name}
           active={currentChannelId === ch.id}
@@ -249,7 +263,7 @@ function ChatTabContent({
       {agents.map((a) => (
         <NavItem
           key={a.id}
-          to={`/dm/${a.id}`}
+          to={projectName ? projectDmPath(projectName, a.id) : '/'}
           icon={<Avatar name={a.name} kind="agent" size="sm" />}
           label={
             <span className="flex items-center gap-1.5 min-w-0">
@@ -261,7 +275,7 @@ function ChatTabContent({
               )}
             </span>
           }
-          rightSlot={<StatusDot status={a.status} size="xs" />}
+          rightSlot={<AgentStatusDot agentId={a.id} size="xs" />}
           active={currentDmAgentId === a.id}
         />
       ))}
@@ -271,18 +285,21 @@ function ChatTabContent({
 
 function MembersTabContent({
   agents,
+  currentProject,
   onCreateAgent,
 }: {
   agents: Agent[];
+  currentProject: Project | null;
   onCreateAgent?: () => void;
 }) {
+  const projectName = currentProject?.name;
   return (
     <div className="pb-3">
       <SectionHeader label="AGENTS" count={agents.length} onAdd={onCreateAgent} />
       {agents.map((a) => (
         <NavItem
           key={a.id}
-          to={`/agent/${a.id}`}
+          to={projectName ? projectAgentProfilePath(projectName, a.id) : '/'}
           icon={<Avatar name={a.name} kind="agent" size="sm" />}
           label={
             <span className="flex items-center gap-1.5 min-w-0">
@@ -294,7 +311,7 @@ function MembersTabContent({
               )}
             </span>
           }
-          rightSlot={<StatusDot status={a.status} size="xs" />}
+          rightSlot={<AgentStatusDot agentId={a.id} size="xs" />}
         />
       ))}
       {agents.length === 0 && (
@@ -369,6 +386,7 @@ function ProjectSwitcher({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!open) return;
@@ -408,6 +426,7 @@ function ProjectSwitcher({
                 onClick={() => {
                   onSelect(p.id);
                   setOpen(false);
+                  navigate(projectIndexPath(p.name));
                 }}
                 className={cn(
                   'w-full text-left px-3 py-2 text-sm hover:bg-accent-yellow flex items-center justify-between gap-2',

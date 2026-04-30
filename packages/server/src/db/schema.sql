@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS channels (
 -- 2. agents
 --
 -- v1.0 新增 project_id 列（D-13）；对旧 db 由 migrate() 幂等补列。
--- v0 的 status 字段 CP5 会移除，目前仍保留以不破坏现有前端。
+-- v0 的 status 字段已在 CP8.3 移除（对齐 D-1：状态从 agent_runs 派生）。
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS agents (
   id              TEXT PRIMARY KEY,
@@ -34,8 +34,6 @@ CREATE TABLE IF NOT EXISTS agents (
   model           TEXT,
   reasoning       TEXT,
   env_vars_json   TEXT,
-  status          TEXT NOT NULL DEFAULT 'idle'
-                  CHECK(status IN ('idle','thinking','working','error','stopped')),
   project_id      TEXT REFERENCES projects(id) ON DELETE CASCADE,
   created_at      INTEGER NOT NULL
 );

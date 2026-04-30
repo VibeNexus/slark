@@ -26,9 +26,21 @@ export function initWSBridge(): void {
           .getState()
           .finalizeMessage(event.message_id, event.final_content, event.metadata);
         break;
-      case 'agent_status':
-        useAgentsStore.getState().setStatus(event.agent_id, event.status);
+      case 'agent_status': {
+        // CP8.3：状态完全由 agent_runs 派生（per-channel）。
+        // - thinking/working/error/stopped：写入 per-channel map
+        // - idle：表示该 channel 的 run 结束，从 map 移除
+        // 旧的 agents.status 字段已删除，前端不再维护"全局 status"，而是通过 getDerivedStatus 派生。
+        const store = useAgentsStore.getState();
+        if (event.channel_id) {
+          if (event.status === 'idle') {
+            store.clearChannelRun(event.agent_id, event.channel_id);
+          } else {
+            store.setChannelRunStatus(event.agent_id, event.channel_id, event.status);
+          }
+        }
         break;
+      }
       default:
         break;
     }

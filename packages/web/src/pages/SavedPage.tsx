@@ -4,6 +4,7 @@ import type { Agent, ChatMessage, Channel } from '@slark/shared';
 import { listSaved, unsaveMessage } from '../lib/api';
 import { useAgentsStore } from '../stores/agents';
 import { useChannelsStore } from '../stores/channels';
+import { channelPath } from '../lib/routes';
 import { Avatar } from '../components/Avatar';
 
 export function SavedPage() {
@@ -58,13 +59,12 @@ export function SavedPage() {
               message={m}
               agent={m.sender_id ? agentsById.get(m.sender_id) : undefined}
               channel={channelsById.get(m.channel_id)}
-              onOpen={() =>
+              onOpen={() => {
+                const base = channelPath(m.channel_id);
                 navigate(
-                  m.parent_id
-                    ? `/channel/${m.channel_id}?thread=${encodeURIComponent(m.parent_id)}`
-                    : `/channel/${m.channel_id}`,
-                )
-              }
+                  m.parent_id ? `${base}?thread=${encodeURIComponent(m.parent_id)}` : base,
+                );
+              }}
               onUnsave={() => void remove(m.id)}
             />
           ))
