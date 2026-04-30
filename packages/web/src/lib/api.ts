@@ -5,6 +5,7 @@
 import type {
   Agent,
   AgentActivity,
+  AgentFeedback,
   ChatMessage,
   Channel,
   Decision,
@@ -384,3 +385,23 @@ export const updateLesson = (
 
 export const deleteLesson = (id: number) =>
   request<void>(`/api/lessons/${id}`, { method: 'DELETE' });
+
+// Agent Feedback (Sprint 5 CP4 / CP5)
+
+export const listAgentFeedback = (agentId: string) =>
+  request<AgentFeedback[]>(`/api/agents/${agentId}/feedback`);
+
+export const runCoachForAgent = (agentId: string) =>
+  request<{ feedback: AgentFeedback | null }>(
+    `/api/agents/${agentId}/feedback/run-coach`,
+    { method: 'POST' },
+  );
+
+export const applyAgentFeedback = (id: number) =>
+  request<AgentFeedback>(`/api/feedback/${id}/apply`, { method: 'POST' });
+
+export const rejectAgentFeedback = (id: number) =>
+  request<AgentFeedback>(`/api/feedback/${id}/reject`, { method: 'POST' });
+
+export const rollbackAgentFeedback = (id: number) =>
+  request<AgentFeedback>(`/api/feedback/${id}/rollback`, { method: 'POST' });

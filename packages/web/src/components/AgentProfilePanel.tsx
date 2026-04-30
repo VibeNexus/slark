@@ -2,21 +2,25 @@
  * Agent Profile 右侧面板
  * 参考: docs/ui-reference/screenshots/40-agent-profile-desktop.png + 41-agent-profile-actions.png
  *
- * v1.0 修订（Sprint 1 CP6 / D-8）：
- *   - 从原版 3 Tab 简化为 2 Tab：PROFILE / ACTIVITY
- *   - 删除 WORKSPACE Tab（Slark 不再提供 Agent 独立 workspace；
- *     项目代码由 project.workspace_path 承载，Agent 无私人沙盒展示位）
- *   - FEEDBACK Tab 将在 Sprint 5 Evolution Loop 上线作为第 3 Tab
+ * v1.0 修订：
+ *   - 从原版 3 Tab 简化为 2 Tab：PROFILE / ACTIVITY（CP6 / D-8）
+ *   - 删除 WORKSPACE Tab（Slark 不再提供 Agent 独立 workspace）
+ *   - Sprint 5 CP4：新增 FEEDBACK Tab（Coach 建议 + Apply / Reject / Rollback）
  */
 
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import type { Agent, AgentActivity, AgentStatus } from '@slark/shared';
+import type { Agent, AgentActivity, AgentFeedback, AgentStatus } from '@slark/shared';
 import { cn } from '../lib/cn';
 import {
+  applyAgentFeedback,
   deleteAgent,
   getAgentActivity,
+  listAgentFeedback,
+  rejectAgentFeedback,
   restartAgent,
+  rollbackAgentFeedback,
+  runCoachForAgent,
   startAgent,
   stopAgent,
   updateAgent,
@@ -33,7 +37,7 @@ interface Props {
   agent: Agent;
 }
 
-type TabKey = 'profile' | 'activity';
+type TabKey = 'profile' | 'activity' | 'feedback';
 
 export function AgentProfilePanel({ agent }: Props) {
   const [params, setParams] = useSearchParams();
@@ -101,7 +105,7 @@ export function AgentProfilePanel({ agent }: Props) {
         </IconButton>
       </header>
 
-      {/* 2 Tab（v1.0 CP6 简化，原 WORKSPACE Tab 已删除） */}
+      {/* 3 Tab：PROFILE / ACTIVITY / FEEDBACK（Sprint 5 CP4） */}
       <div className="flex border-b-2 border-black">
         <TabButton active={tab === 'profile'} onClick={() => setTab('profile')}>
           <ProfileIcon /> PROFILE
@@ -109,13 +113,268 @@ export function AgentProfilePanel({ agent }: Props) {
         <TabButton active={tab === 'activity'} onClick={() => setTab('activity')}>
           <ActivityIcon /> ACTIVITY
         </TabButton>
+        <TabButton active={tab === 'feedback'} onClick={() => setTab('feedback')}>
+          <FeedbackIcon /> FEEDBACK
+        </TabButton>
       </div>
 
       <div className="flex-1 overflow-y-auto">
         {tab === 'profile' && <ProfileTab agent={agent} onDelete={actionHandlers.delete} onStart={actionHandlers.start} onStop={actionHandlers.stop} onRestart={actionHandlers.restart} />}
         {tab === 'activity' && <ActivityTab agent={agent} />}
+        {tab === 'feedback' && <FeedbackTab agent={agent} />}
       </div>
     </aside>
+  );
+}
+
+function FeedbackIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+    </svg>
+  );
+}
+
+// =============================================================================
+// FEEDBACK Tab
+// =============================================================================
+
+function FeedbackTab({ agent }: { agent: Agent }) {
+  const [items, setItems] = useState<AgentFeedback[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<number | null>(null);
+  const [coachBusy, setCoachBusy] = useState(false);
+  const [coachMsg, setCoachMsg] = useState<string | null>(null);
+  const upsertAgent = useAgentsStore((s) => s.upsert);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const list = await listAgentFeedback(agent.id);
+      setItems(list);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent.id]);
+
+  const onApply = async (f: AgentFeedback) => {
+    if (!confirm(`Apply this proposal? agents.description will change immediately.`)) return;
+    setBusy(f.id);
+    try {
+      await applyAgentFeedback(f.id);
+      // 刷新 agent 全局状态（让 ProfileTab 也看到新 description）
+      upsertAgent({ ...agent, description: f.description_after });
+      await load();
+    } catch (e) {
+      alert(`Apply failed: ${(e as Error).message}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onReject = async (f: AgentFeedback) => {
+    setBusy(f.id);
+    try {
+      await rejectAgentFeedback(f.id);
+      await load();
+    } catch (e) {
+      alert(`Reject failed: ${(e as Error).message}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onRollback = async (f: AgentFeedback) => {
+    if (!confirm(`Rollback to the description from before this proposal was applied?`)) return;
+    setBusy(f.id);
+    try {
+      await rollbackAgentFeedback(f.id);
+      upsertAgent({ ...agent, description: f.description_before });
+      await load();
+    } catch (e) {
+      alert(`Rollback failed: ${(e as Error).message}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onRunCoach = async () => {
+    setCoachBusy(true);
+    setCoachMsg(null);
+    try {
+      const res = await runCoachForAgent(agent.id);
+      if (res.feedback) {
+        setCoachMsg(`New proposal: "${res.feedback.summary}"`);
+        await load();
+      } else {
+        setCoachMsg(
+          'No new proposal — Coach saw no recurring negative pattern (or one is already pending).',
+        );
+      }
+    } catch (e) {
+      setCoachMsg(`Failed: ${(e as Error).message}`);
+    } finally {
+      setCoachBusy(false);
+    }
+  };
+
+  return (
+    <div className="p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => void onRunCoach()}
+          disabled={coachBusy}
+          className="px-3 py-1 text-xs font-bold border-2 border-black rounded bg-accent-pink hover:brightness-105 disabled:opacity-50"
+        >
+          {coachBusy ? 'Running Coach…' : '▶ Run Coach now'}
+        </button>
+        {coachMsg && (
+          <span className="text-[11px] font-mono text-text-secondary truncate">{coachMsg}</span>
+        )}
+      </div>
+      <div className="text-[11px] font-mono text-text-secondary">
+        Coach automatically runs every 24h after Evaluator collects observations. You can also run
+        it manually here when you want a fresh proposal.
+      </div>
+
+      {loading && items.length === 0 ? (
+        <div className="text-text-secondary font-mono text-sm">Loading…</div>
+      ) : items.length === 0 ? (
+        <div className="text-text-secondary font-mono text-sm py-6 text-center">
+          No proposals yet. Once Evaluator records ≥ 3 negative observations of the same tag, Coach
+          will produce a description edit suggestion here.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {items.map((f) => (
+            <FeedbackCard
+              key={f.id}
+              f={f}
+              busy={busy === f.id}
+              onApply={() => void onApply(f)}
+              onReject={() => void onReject(f)}
+              onRollback={() => void onRollback(f)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FeedbackCard({
+  f,
+  busy,
+  onApply,
+  onReject,
+  onRollback,
+}: {
+  f: AgentFeedback;
+  busy: boolean;
+  onApply: () => void;
+  onReject: () => void;
+  onRollback: () => void;
+}) {
+  const [showDiff, setShowDiff] = useState(false);
+  const statusLabel = (() => {
+    switch (f.status) {
+      case 'pending':
+        return { text: 'PENDING', cls: 'bg-accent-yellow' };
+      case 'applied':
+        return { text: 'APPLIED', cls: 'bg-[#b8e98c]' };
+      case 'rejected':
+        return { text: 'REJECTED', cls: 'bg-bg-card text-text-secondary' };
+      case 'rolled_back':
+        return { text: 'ROLLED BACK', cls: 'bg-accent-orange/40' };
+    }
+  })();
+
+  return (
+    <div className="border-2 border-black rounded bg-bg-card p-3">
+      <div className="flex items-center gap-2 mb-1">
+        <span
+          className={cn(
+            'text-[10px] font-bold font-mono px-1.5 py-0.5 border-2 border-black rounded',
+            statusLabel.cls,
+          )}
+        >
+          {statusLabel.text}
+        </span>
+        <span className="font-bold text-sm flex-1 truncate">{f.summary}</span>
+        {f.confidence !== null && (
+          <span className="text-[10px] font-mono text-text-secondary">
+            conf {f.confidence.toFixed(2)}
+          </span>
+        )}
+      </div>
+      <div className="text-[12px] mb-2 whitespace-pre-wrap">{f.rationale}</div>
+      <div className="text-[10px] font-mono text-text-muted mb-2">
+        period {new Date(f.period_start).toLocaleDateString()} →{' '}
+        {new Date(f.period_end).toLocaleDateString()} · created{' '}
+        {new Date(f.created_at).toLocaleString()}
+      </div>
+
+      <button
+        onClick={() => setShowDiff((v) => !v)}
+        className="text-[11px] font-mono text-text-secondary hover:underline mb-2"
+      >
+        {showDiff ? '▾ Hide diff' : '▸ Show description diff'}
+      </button>
+      {showDiff && (
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <div>
+            <div className="text-[10px] font-mono uppercase text-text-secondary mb-1">before</div>
+            <pre className="max-h-48 overflow-auto bg-bg-main border-2 border-black/30 rounded p-2 text-[11px] font-mono whitespace-pre-wrap break-words">
+              {f.description_before || '(empty)'}
+            </pre>
+          </div>
+          <div>
+            <div className="text-[10px] font-mono uppercase text-text-secondary mb-1">after</div>
+            <pre className="max-h-48 overflow-auto bg-bg-main border-2 border-black/30 rounded p-2 text-[11px] font-mono whitespace-pre-wrap break-words">
+              {f.description_after}
+            </pre>
+          </div>
+        </div>
+      )}
+
+      {f.status === 'pending' && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onApply}
+            disabled={busy}
+            className="flex-1 px-3 py-1.5 border-2 border-black rounded bg-[#b8e98c] hover:brightness-105 font-bold text-sm disabled:opacity-50"
+          >
+            ✓ Apply
+          </button>
+          <button
+            onClick={onReject}
+            disabled={busy}
+            className="px-3 py-1.5 border-2 border-black rounded bg-bg-card hover:bg-accent-orange/40 font-bold text-sm disabled:opacity-50"
+          >
+            ↩ Reject
+          </button>
+        </div>
+      )}
+      {f.status === 'applied' && (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-mono text-text-secondary flex-1">
+            applied{f.applied_at ? ` ${new Date(f.applied_at).toLocaleString()}` : ''}
+          </span>
+          <button
+            onClick={onRollback}
+            disabled={busy}
+            className="px-3 py-1 border-2 border-black rounded bg-bg-card hover:bg-accent-orange/40 font-bold text-xs disabled:opacity-50"
+          >
+            ↶ Rollback
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
