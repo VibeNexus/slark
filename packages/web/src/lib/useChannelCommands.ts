@@ -44,6 +44,12 @@ export function useChannelCommands(
       name: '/comment',
       description: 'Add a side note (no workflow effect)',
     });
+    if (inThread) {
+      hints.push({
+        name: '/sediment',
+        description: 'Ask Scribe to extract decisions / lessons from this thread',
+      });
+    }
     return hints;
   }, [channelId, channels, workflowsByProject, inThread]);
 }

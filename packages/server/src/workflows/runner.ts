@@ -32,6 +32,7 @@ import type {
 import { LOCAL_USER_ID } from '@slark/shared';
 import {
   agentRepo,
+  channelRepo,
   messageRepo,
   workflowRepo,
   workflowRunRepo,
@@ -39,6 +40,7 @@ import {
 import { hub } from '../ws/hub.js';
 import { abortChannelAgentRuns, triggerAgent } from '../agents/engine.js';
 import { parseAgentMention, parseWorkflowYaml } from './yaml-parser.js';
+import { persistScribeOutput, runScribe } from '../system-agents/scribe.js';
 
 interface RunnerLogger {
   info: (msg: string) => void;
@@ -497,7 +499,7 @@ function emitSystemMessage(
   db: Database,
   run: WorkflowRun,
   parentId: string | null,
-  input: { content: string; metadata: MessageMetadata },
+  input: { content: string; metadata: MessageMetadata | null },
 ): ChatMessage {
   const sysMsg = messageRepo.create(db, {
     channel_id: run.channel_id,
@@ -508,7 +510,7 @@ function emitSystemMessage(
     parent_id: parentId ?? null,
   });
   hub.broadcast(run.channel_id, { type: 'message', message: sysMsg });
-  if (input.metadata.system_event) {
+  if (input.metadata?.system_event) {
     hub.broadcast(run.channel_id, {
       type: 'system_event',
       event: { channel_id: run.channel_id, ...input.metadata.system_event },
@@ -553,6 +555,63 @@ function completeRun(
     },
   });
   broadcastRunUpdate(db, runId);
+
+  // Sprint 4 CP3：自动触发 Scribe 沉淀（fire-and-forget）
+  void scribeRunInBackground(db, runId);
+}
+
+/**
+ * 后台跑 Scribe 提炼 thread 知识，结果以 review_status='pending' 写入 db。
+ * 失败不影响 workflow run 的状态。
+ */
+async function scribeRunInBackground(db: Database, runId: number): Promise<void> {
+  const run = workflowRunRepo.getById(db, runId);
+  if (!run || run.status !== 'completed') return;
+  if (!run.thread_id) return;
+  const ch = channelRepo.getById(db, run.channel_id);
+  if (!ch?.project_id) return;
+  const wf = workflowRepo.getById(db, run.workflow_id);
+  if (!wf) return;
+
+  const threadMessages = messageRepo.listThread(db, run.thread_id);
+  const projectAgents = agentRepo.listByProject(db, ch.project_id);
+  const roleMap: Record<string, string> = {};
+  for (const a of projectAgents) {
+    roleMap[a.id] = a.name;
+  }
+
+  const state = parseState(run.state_json);
+
+  try {
+    const output = await runScribe({
+      project_id: ch.project_id,
+      trigger: {
+        kind: 'workflow_run',
+        workflow_name: wf.name,
+        initial_input: state.initial_input,
+        run_id: runId,
+      },
+      thread_messages: threadMessages,
+      agent_role_map: roleMap,
+    });
+
+    if (output.is_fallback) return; // 静默失败，不污染 thread
+
+    const persisted = persistScribeOutput(db, ch.project_id, output, {
+      source_run_id: runId,
+    });
+    if (persisted.decisions.length === 0 && persisted.lessons.length === 0) {
+      return;
+    }
+    // emit 一条小 system msg 让用户知道 Intelligence Tab 有新东西要审
+    const summary = `📚 Scribe sedimented ${persisted.decisions.length} decision(s) + ${persisted.lessons.length} lesson(s) — review them in Intelligence.`;
+    emitSystemMessage(db, run, run.thread_id, {
+      content: summary,
+      metadata: null,
+    });
+  } catch {
+    /* 已在 runScribe 内部 catch；这里再吞一次保险 */
+  }
 }
 
 function failRun(db: Database, runId: number, reason: string): void {

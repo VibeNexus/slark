@@ -37,6 +37,7 @@ import {
   overrideWorkflowRun,
   startWorkflowRun,
 } from '../workflows/runner.js';
+import { persistScribeOutput, runScribe } from '../system-agents/scribe.js';
 
 export interface MessageRouterDeps {
   db: Database;
@@ -279,6 +280,7 @@ const CONTROL_COMMANDS = new Set([
   '/abort',
   '/comment',
   '/override',
+  '/sediment',
 ]);
 
 interface ParsedCommand {
@@ -370,6 +372,29 @@ async function handleControlCommand(input: {
     return true;
   }
 
+  // /sediment 手动触发 Scribe（仅 thread 内有意义；CP3）
+  if (cmd.name === '/sediment') {
+    if (!threadId) {
+      emitInfoMessage(
+        db,
+        channelId,
+        null,
+        'ℹ /sediment only works inside a thread.',
+      );
+      return true;
+    }
+    void manualSediment({ db, channelId, threadId, reason: cmd.args || undefined }).catch(
+      (e) => logger.error(`[router] /sediment failed: ${(e as Error).message}`),
+    );
+    emitInfoMessage(
+      db,
+      channelId,
+      threadId,
+      '📚 Scribe is reviewing this thread… results will appear in Intelligence.',
+    );
+    return true;
+  }
+
   if (!threadId) {
     emitInfoMessage(db, channelId, null, `ℹ ${cmd.name} only works inside a workflow thread.`);
     return true;
@@ -452,6 +477,58 @@ function emitInfoMessage(
     parent_id: parentId,
   });
   hub.broadcast(channelId, { type: 'message', message: sysMsg });
+}
+
+/**
+ * 用户 /sediment <reason> 时手动触发 Scribe 处理当前 thread。
+ * fire-and-forget；处理完毕在 Intelligence Tab 出 pending 条目。
+ */
+async function manualSediment(input: {
+  db: Database;
+  channelId: string;
+  threadId: string;
+  reason?: string;
+}): Promise<void> {
+  const { db, channelId, threadId, reason } = input;
+  const channel = channelRepo.getById(db, channelId);
+  if (!channel?.project_id) return;
+
+  const threadMessages = messageRepo.listThread(db, threadId);
+  if (threadMessages.length === 0) return;
+  const projectAgents = agentRepo.listByProject(db, channel.project_id);
+  const roleMap: Record<string, string> = {};
+  for (const a of projectAgents) {
+    roleMap[a.id] = a.name;
+  }
+
+  const output = await runScribe({
+    project_id: channel.project_id,
+    trigger: { kind: 'manual', reason },
+    thread_messages: threadMessages,
+    agent_role_map: roleMap,
+  });
+
+  if (output.is_fallback) {
+    emitInfoMessage(
+      db,
+      channelId,
+      threadId,
+      `⚠ Scribe failed: ${output.fallback_reason ?? 'unknown'}`,
+    );
+    return;
+  }
+
+  // 找该 thread 上是否绑定了 workflow_run；有则关联
+  const run = workflowRunRepo.getActive(db, channelId, threadId);
+  const persisted = persistScribeOutput(db, channel.project_id, output, {
+    source_run_id: run?.id ?? null,
+  });
+  emitInfoMessage(
+    db,
+    channelId,
+    threadId,
+    `📚 Scribe sedimented ${persisted.decisions.length} decision(s) + ${persisted.lessons.length} lesson(s) — review in Intelligence.`,
+  );
 }
 
 async function resolveMentionsToAgents(
