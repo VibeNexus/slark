@@ -97,8 +97,9 @@ Layer 1:  Goal            项目目标（一等公民，必填）
 | v0 MVP — 基础聊天室能力 | M1~M5 骨架 + 链式触发 + Tasks 面板 | ✅ 已交付（Sprint 1 起点）|
 | **Sprint 1** — Foundation + Goal → AI Team | Programmable AI Team OS 雏形 | ✅ **已交付**（见 [`docs/sprint1-milestone.md`](docs/sprint1-milestone.md)） |
 | **Sprint 2** — Workflow Framework | Workflow YAML + 3 内置模板 + 执行引擎 | ✅ **已交付**（见 [`docs/sprint2-milestone.md`](docs/sprint2-milestone.md)） |
-| **Sprint 3** — Responsibility + User Intervention | 批准流 + 用户介入 + Workflow Import/Export | ⏳ **当前焦点** |
-| Sprint 4 — Delivery Loop (Scribe) | 沉淀 + Intelligence Tab | 规划 |
+| **Sprint 3** — Responsibility + User Intervention | 批准流 + 用户介入 + Workflow Import/Export | ✅ **已交付**（见 [`docs/sprint3-milestone.md`](docs/sprint3-milestone.md)） |
+| **Sprint 4** — Delivery Loop (Scribe) | 沉淀 + Intelligence Tab | ⏳ **当前焦点** |
+| **Sprint 4** — Delivery Loop (Scribe) | 沉淀 + Intelligence Tab | ⏳ **当前焦点** |
 | Sprint 5 — Evolution Loop | Evaluator + Coach + Description 演化 | 规划 |
 | Sprint 6 — Onboarding Loop + Skill Matrix | 新 Project 自动分析 + 能力地图 | 规划 |
 | Sprint 7 — Team-First-Collaborative Workflow Design | Facilitator 主持的 Workflow Design Session | 规划 |
@@ -157,43 +158,24 @@ CP8 + CP1 ~ CP5 全部交付：
 
 ---
 
-## Sprint 3: Responsibility + User Intervention（当前焦点）
+### Sprint 3：Responsibility + User Intervention ✅
 
-**目标**：Workflow 中用户可以随时介入、批准、拒绝、override；Workflow 可以导入导出。
+**目标已达成**：Workflow 中用户可随时介入；Workflow 可导入导出。
 
-**战略价值**：AI 团队**有边界、可控、可审计**。
+CP1 ~ CP6 全部交付：
 
-**预估工期**：4~5 工作日
+- CP1 `responsibilities` 表（schema_version → 5）+ 从 YAML 自动推导 executor / approver
+- CP2 ApprovalCard 组件（替代 awaiting_approval 文字提示）+ Inbox 跨 Project 视图
+- CP3 `/comment` `/override` 完整化；`/abort` 真正 kill cursor-agent 子进程
+- CP4 Workflow YAML Import / Export + WorkflowsPage 管理页
+- CP5 触发 workflow 后前端自动跳 thread
+- CP6 Sprint 3 milestone
 
-### 范围
-
-- [ ] `responsibilities` 表（按 `product-brief.md` D-5）+ 从 YAML 自动推导 `executor`
-- [ ] **Approval Card 组件**：替代当前的 "⏸ Reply /approve..." 文字提示
-  - 显示当前 step / pending question / 操作按钮（Approve / Reject + reason 输入框）
-  - Inbox 视图（待批准动作汇总，跨 channel）—— 可选 P1
-- [ ] Slark 内联指令协议完整化（参考 [`docs/clawteam-comparison.md`](docs/clawteam-comparison.md) B-2）：
-  - `/approve` `/reject` `/abort`（Sprint 2 已落 CP3）
-  - `/comment` 添加批注但不推进 step
-  - `/override` 强制把当前 step 标 completed 并跳到下一步
-- [ ] **`/abort` 真正 kill 运行中的 agent CLI 进程**（清掉 TD-7）
-  - 集成 `agentRunRepo.listActiveInChannel` + CLIRunner 的 abort 接口
-- [ ] Workflow YAML Import / Export（清掉 TD-10）
-  - 下载：`GET /api/workflows/:id/export` → `<name>.workflow.yaml`
-  - 上传：`POST /api/projects/:id/workflows/import`（multipart）
-- [ ] **UX 增强**（清掉 TD-11）：用户触发 workflow 后前端自动跳转到该 thread
-
-### 验收
-
-- [ ] 用户可以中断正在运行的 Workflow（`/abort` + agent 进程被 kill）
-- [ ] await_approval step 显示 Approval Card；点 Approve 推进；点 Reject 后输入 reason 推进
-- [ ] reject 时反馈作为下一轮 spawn 的额外 context 注入（Sprint 2 已生效，Sprint 3 验收 UI 流程）
-- [ ] `/comment` 在 thread 内留批注，不推进 step；`/override` 跳过当前 step
-- [ ] Workflow Export 出 YAML 文件，Import 回另一个 Project 后能正常运行
-- [ ] 用户输入 `/new-feature ...` 后，前端自动打开该 thread 看进度条
+详细交付清单 + 手动验收 runbook + 已知技术债 → [`docs/sprint3-milestone.md`](docs/sprint3-milestone.md)。
 
 ---
 
-## Sprint 4: Delivery Loop（Scribe 沉淀）
+## Sprint 4: Delivery Loop（Scribe 沉淀）（当前焦点）
 
 > Review 3 拆分：本 Sprint 只做 Scribe；Facilitator 独立成 Sprint 7。
 
