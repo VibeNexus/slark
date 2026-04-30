@@ -320,6 +320,50 @@ export interface WorkflowRunState {
 }
 
 // =============================================================================
+// Knowledge — Decisions / Lessons (Sprint 4 / D-20 Delivery Loop)
+// =============================================================================
+
+export type ReviewStatus = 'pending' | 'approved' | 'rejected';
+export type LessonKind = 'do' | 'dont' | 'pattern' | 'pitfall';
+
+/** 项目级决策记录 */
+export interface Decision {
+  id: number;
+  project_id: string;
+  title: string;
+  body: string;
+  /** 'all' / 'team' / agent.id / agent.name */
+  audience: string;
+  source_run_id: number | null;
+  source_message_id: string | null;
+  confidence: number | null;
+  review_status: ReviewStatus;
+  /** 'scribe' / agent.id / 'local-user' */
+  recorded_by: string;
+  created_at: number;
+  reviewed_at: number | null;
+}
+
+/** 项目级经验条目 */
+export interface Lesson {
+  id: number;
+  project_id: string;
+  kind: LessonKind;
+  title: string;
+  body: string;
+  audience: string;
+  tags: string[];
+  source_run_id: number | null;
+  source_message_id: string | null;
+  confidence: number | null;
+  review_status: ReviewStatus;
+  recorded_by: string;
+  use_count: number;
+  created_at: number;
+  reviewed_at: number | null;
+}
+
+// =============================================================================
 // Responsibility (Sprint 3 / D-17)
 // =============================================================================
 

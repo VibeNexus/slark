@@ -219,3 +219,56 @@ CREATE TABLE IF NOT EXISTS responsibilities (
 );
 CREATE INDEX IF NOT EXISTS idx_responsibilities_workflow ON responsibilities(workflow_id);
 CREATE INDEX IF NOT EXISTS idx_responsibilities_agent ON responsibilities(agent_id);
+
+-- =============================================================================
+-- 14. decisions (Sprint 4 引入，对齐 docs/technical-decisions.md D-20)
+--
+-- 项目级决策记录。来源：
+--   - Scribe 自动从 thread / workflow_run 提炼（recorded_by='scribe', review_status='pending'）
+--   - 用户手动 /decide（review_status='approved'）
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS decisions (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  title           TEXT NOT NULL,
+  body            TEXT NOT NULL,
+  audience        TEXT NOT NULL DEFAULT 'all',
+  source_run_id   INTEGER REFERENCES workflow_runs(id) ON DELETE SET NULL,
+  source_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+  confidence      REAL,
+  review_status   TEXT NOT NULL DEFAULT 'pending'
+                  CHECK(review_status IN ('pending','approved','rejected')),
+  recorded_by     TEXT NOT NULL,
+  created_at      INTEGER NOT NULL,
+  reviewed_at     INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_decisions_project ON decisions(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_decisions_review ON decisions(project_id, review_status);
+
+-- =============================================================================
+-- 15. lessons (Sprint 4 引入)
+--
+-- 项目级经验条目。kind: 'do' | 'dont' | 'pattern' | 'pitfall'
+-- audience: 'all' / 'team' / agent.id / agent.name —— ContextBuilder 注入时按此过滤。
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS lessons (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL CHECK(kind IN ('do','dont','pattern','pitfall')),
+  title           TEXT NOT NULL,
+  body            TEXT NOT NULL,
+  audience        TEXT NOT NULL DEFAULT 'all',
+  tags_json       TEXT,
+  source_run_id   INTEGER REFERENCES workflow_runs(id) ON DELETE SET NULL,
+  source_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+  confidence      REAL,
+  review_status   TEXT NOT NULL DEFAULT 'pending'
+                  CHECK(review_status IN ('pending','approved','rejected')),
+  recorded_by     TEXT NOT NULL,
+  use_count       INTEGER NOT NULL DEFAULT 0,
+  created_at      INTEGER NOT NULL,
+  reviewed_at     INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_lessons_project ON lessons(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_lessons_review ON lessons(project_id, review_status);
+CREATE INDEX IF NOT EXISTS idx_lessons_audience ON lessons(project_id, audience);

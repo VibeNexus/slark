@@ -18,11 +18,15 @@ import type {
   ActivityType,
   Channel,
   ChatMessage,
+  Decision,
+  Lesson,
+  LessonKind,
   MessageMetadata,
   Project,
   Responsibility,
   ResponsibilityAuthority,
   ResponsibilityRole,
+  ReviewStatus,
   Task,
   Workflow,
   WorkflowRun,
@@ -1288,5 +1292,349 @@ export const responsibilityRepo = {
 
   remove(db: Database, id: number): void {
     db.prepare('DELETE FROM responsibilities WHERE id = ?').run(id);
+  },
+};
+
+// =============================================================================
+// Decisions (Sprint 4 / D-20)
+// =============================================================================
+
+interface DecisionRow {
+  id: number;
+  project_id: string;
+  title: string;
+  body: string;
+  audience: string;
+  source_run_id: number | null;
+  source_message_id: string | null;
+  confidence: number | null;
+  review_status: string;
+  recorded_by: string;
+  created_at: number;
+  reviewed_at: number | null;
+}
+
+function rowToDecision(r: DecisionRow): Decision {
+  return {
+    id: r.id,
+    project_id: r.project_id,
+    title: r.title,
+    body: r.body,
+    audience: r.audience,
+    source_run_id: r.source_run_id,
+    source_message_id: r.source_message_id,
+    confidence: r.confidence,
+    review_status: r.review_status as ReviewStatus,
+    recorded_by: r.recorded_by,
+    created_at: r.created_at,
+    reviewed_at: r.reviewed_at,
+  };
+}
+
+export const decisionRepo = {
+  listByProject(
+    db: Database,
+    projectId: string,
+    opts?: { review_status?: ReviewStatus; limit?: number },
+  ): Decision[] {
+    const where: string[] = ['project_id = ?'];
+    const params: unknown[] = [projectId];
+    if (opts?.review_status) {
+      where.push('review_status = ?');
+      params.push(opts.review_status);
+    }
+    const limit = opts?.limit ?? 200;
+    params.push(limit);
+    const rows = db
+      .prepare(
+        `SELECT * FROM decisions WHERE ${where.join(' AND ')}
+         ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(...params) as DecisionRow[];
+    return rows.map(rowToDecision);
+  },
+
+  getById(db: Database, id: number): Decision | null {
+    const row = db.prepare('SELECT * FROM decisions WHERE id = ?').get(id) as
+      | DecisionRow
+      | undefined;
+    return row ? rowToDecision(row) : null;
+  },
+
+  create(
+    db: Database,
+    input: {
+      project_id: string;
+      title: string;
+      body: string;
+      audience?: string;
+      source_run_id?: number | null;
+      source_message_id?: string | null;
+      confidence?: number | null;
+      review_status?: ReviewStatus;
+      recorded_by: string;
+    },
+  ): Decision {
+    const ts = now();
+    const result = db
+      .prepare(
+        `INSERT INTO decisions (project_id, title, body, audience, source_run_id, source_message_id, confidence, review_status, recorded_by, created_at, reviewed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.project_id,
+        input.title,
+        input.body,
+        input.audience ?? 'all',
+        input.source_run_id ?? null,
+        input.source_message_id ?? null,
+        input.confidence ?? null,
+        input.review_status ?? 'pending',
+        input.recorded_by,
+        ts,
+        input.review_status === 'approved' || input.review_status === 'rejected' ? ts : null,
+      );
+    const d = this.getById(db, Number(result.lastInsertRowid));
+    if (!d) throw new Error('decision insert failed');
+    return d;
+  },
+
+  updateReview(
+    db: Database,
+    id: number,
+    status: ReviewStatus,
+    patch?: { title?: string; body?: string; audience?: string },
+  ): Decision | null {
+    const fields: string[] = ['review_status = ?', 'reviewed_at = ?'];
+    const values: unknown[] = [status, now()];
+    if (patch?.title !== undefined) {
+      fields.push('title = ?');
+      values.push(patch.title);
+    }
+    if (patch?.body !== undefined) {
+      fields.push('body = ?');
+      values.push(patch.body);
+    }
+    if (patch?.audience !== undefined) {
+      fields.push('audience = ?');
+      values.push(patch.audience);
+    }
+    values.push(id);
+    db.prepare(`UPDATE decisions SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    return this.getById(db, id);
+  },
+
+  remove(db: Database, id: number): void {
+    db.prepare('DELETE FROM decisions WHERE id = ?').run(id);
+  },
+};
+
+// =============================================================================
+// Lessons (Sprint 4 / D-20)
+// =============================================================================
+
+interface LessonRow {
+  id: number;
+  project_id: string;
+  kind: string;
+  title: string;
+  body: string;
+  audience: string;
+  tags_json: string | null;
+  source_run_id: number | null;
+  source_message_id: string | null;
+  confidence: number | null;
+  review_status: string;
+  recorded_by: string;
+  use_count: number;
+  created_at: number;
+  reviewed_at: number | null;
+}
+
+function rowToLesson(r: LessonRow): Lesson {
+  let tags: string[] = [];
+  if (r.tags_json) {
+    try {
+      const parsed = JSON.parse(r.tags_json);
+      if (Array.isArray(parsed)) tags = parsed.filter((x) => typeof x === 'string');
+    } catch {
+      /* ignore */
+    }
+  }
+  return {
+    id: r.id,
+    project_id: r.project_id,
+    kind: r.kind as LessonKind,
+    title: r.title,
+    body: r.body,
+    audience: r.audience,
+    tags,
+    source_run_id: r.source_run_id,
+    source_message_id: r.source_message_id,
+    confidence: r.confidence,
+    review_status: r.review_status as ReviewStatus,
+    recorded_by: r.recorded_by,
+    use_count: r.use_count,
+    created_at: r.created_at,
+    reviewed_at: r.reviewed_at,
+  };
+}
+
+export const lessonRepo = {
+  listByProject(
+    db: Database,
+    projectId: string,
+    opts?: {
+      review_status?: ReviewStatus;
+      audience?: string;
+      kind?: LessonKind;
+      limit?: number;
+    },
+  ): Lesson[] {
+    const where: string[] = ['project_id = ?'];
+    const params: unknown[] = [projectId];
+    if (opts?.review_status) {
+      where.push('review_status = ?');
+      params.push(opts.review_status);
+    }
+    if (opts?.audience) {
+      where.push('audience = ?');
+      params.push(opts.audience);
+    }
+    if (opts?.kind) {
+      where.push('kind = ?');
+      params.push(opts.kind);
+    }
+    const limit = opts?.limit ?? 500;
+    params.push(limit);
+    const rows = db
+      .prepare(
+        `SELECT * FROM lessons WHERE ${where.join(' AND ')}
+         ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(...params) as LessonRow[];
+    return rows.map(rowToLesson);
+  },
+
+  /** ContextBuilder 用：取已审批且 audience 匹配的最近 N 条 */
+  listForInjection(
+    db: Database,
+    projectId: string,
+    audiences: string[],
+    limit = 20,
+  ): Lesson[] {
+    if (audiences.length === 0) return [];
+    const placeholders = audiences.map(() => '?').join(',');
+    const rows = db
+      .prepare(
+        `SELECT * FROM lessons
+         WHERE project_id = ? AND review_status = 'approved'
+         AND audience IN (${placeholders})
+         ORDER BY use_count DESC, created_at DESC
+         LIMIT ?`,
+      )
+      .all(projectId, ...audiences, limit) as LessonRow[];
+    return rows.map(rowToLesson);
+  },
+
+  getById(db: Database, id: number): Lesson | null {
+    const row = db.prepare('SELECT * FROM lessons WHERE id = ?').get(id) as
+      | LessonRow
+      | undefined;
+    return row ? rowToLesson(row) : null;
+  },
+
+  create(
+    db: Database,
+    input: {
+      project_id: string;
+      kind: LessonKind;
+      title: string;
+      body: string;
+      audience?: string;
+      tags?: string[];
+      source_run_id?: number | null;
+      source_message_id?: string | null;
+      confidence?: number | null;
+      review_status?: ReviewStatus;
+      recorded_by: string;
+    },
+  ): Lesson {
+    const ts = now();
+    const reviewed = input.review_status === 'approved' || input.review_status === 'rejected';
+    const result = db
+      .prepare(
+        `INSERT INTO lessons (project_id, kind, title, body, audience, tags_json, source_run_id, source_message_id, confidence, review_status, recorded_by, created_at, reviewed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.project_id,
+        input.kind,
+        input.title,
+        input.body,
+        input.audience ?? 'all',
+        input.tags?.length ? JSON.stringify(input.tags) : null,
+        input.source_run_id ?? null,
+        input.source_message_id ?? null,
+        input.confidence ?? null,
+        input.review_status ?? 'pending',
+        input.recorded_by,
+        ts,
+        reviewed ? ts : null,
+      );
+    const l = this.getById(db, Number(result.lastInsertRowid));
+    if (!l) throw new Error('lesson insert failed');
+    return l;
+  },
+
+  updateReview(
+    db: Database,
+    id: number,
+    status: ReviewStatus,
+    patch?: {
+      title?: string;
+      body?: string;
+      audience?: string;
+      kind?: LessonKind;
+      tags?: string[];
+    },
+  ): Lesson | null {
+    const fields: string[] = ['review_status = ?', 'reviewed_at = ?'];
+    const values: unknown[] = [status, now()];
+    if (patch?.title !== undefined) {
+      fields.push('title = ?');
+      values.push(patch.title);
+    }
+    if (patch?.body !== undefined) {
+      fields.push('body = ?');
+      values.push(patch.body);
+    }
+    if (patch?.audience !== undefined) {
+      fields.push('audience = ?');
+      values.push(patch.audience);
+    }
+    if (patch?.kind !== undefined) {
+      fields.push('kind = ?');
+      values.push(patch.kind);
+    }
+    if (patch?.tags !== undefined) {
+      fields.push('tags_json = ?');
+      values.push(patch.tags.length ? JSON.stringify(patch.tags) : null);
+    }
+    values.push(id);
+    db.prepare(`UPDATE lessons SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    return this.getById(db, id);
+  },
+
+  bumpUseCount(db: Database, ids: number[]): void {
+    if (ids.length === 0) return;
+    const placeholders = ids.map(() => '?').join(',');
+    db.prepare(
+      `UPDATE lessons SET use_count = use_count + 1 WHERE id IN (${placeholders})`,
+    ).run(...ids);
+  },
+
+  remove(db: Database, id: number): void {
+    db.prepare('DELETE FROM lessons WHERE id = ?').run(id);
   },
 };

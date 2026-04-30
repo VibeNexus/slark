@@ -7,6 +7,7 @@
  *   3 - v1.0 Sprint 2 CP8.3：删除 agents.status 字段（状态从 agent_runs 派生，对齐 D-1）
  *   4 - v1.0 Sprint 2 CP1：新增 workflows / workflow_runs 表（D-16）
  *   5 - v1.0 Sprint 3 CP1：新增 responsibilities 表（D-17）
+ *   6 - v1.0 Sprint 4 CP1：新增 decisions / lessons 表（D-20 Knowledge）
  */
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -24,7 +25,7 @@ const SCHEMA_CANDIDATES = [
 ];
 const SCHEMA_PATH = SCHEMA_CANDIDATES.find((p) => existsSync(p));
 
-const CURRENT_SCHEMA_VERSION = '5';
+const CURRENT_SCHEMA_VERSION = '6';
 
 let _db: DB | null = null;
 
