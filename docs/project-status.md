@@ -12,29 +12,32 @@
 
 | 项 | 值 |
 |---|---|
-| 当前 Sprint | **Sprint 7 — Team-First-Collaborative Workflow Design**（Kickoff 中） |
-| 上一 Sprint | Sprint 6 — Onboarding Loop + Skill Matrix（✅ 已交付，见 [`sprint6-milestone.md`](sprint6-milestone.md)） |
-| 上上 Sprint | Sprint 5 — Evolution Loop（见 [`sprint5-milestone.md`](sprint5-milestone.md)） |
+| 当前 Sprint | **MVP 完成（Sprint 1~7 全部交付）** |
+| 下一阶段 | Sprint 8+ 远期路线（无强制时间表） |
+| 最近 Sprint | Sprint 7 — Team-First-Collaborative Workflow Design（✅ 已交付，见 [`sprint7-milestone.md`](sprint7-milestone.md)） |
 | 当前分支 | `main` |
 | 类型检查 | ✅ pnpm typecheck 通过 |
 
-### Sprint 6 已交付摘要
+### Sprint 7 已交付摘要
 
-- ✅ **CP1** `project_onboarding` / `agent_skills` 表（schema_version → 8）
-- ✅ **CP2 + CP3** Onboarder System Agent + Project 创建异步触发 + Onboarding 卡片
-- ✅ **CP4 + CP5** Skill Matrix 从 tool_call 自动统计 + Create Task 智能推荐 assignee
-- ✅ **CP6** Sprint 6 milestone 文档
+- ✅ **CP1** `workflow_sessions` 表（schema_version → 9）
+- ✅ **CP2 + CP3** Facilitator System Agent + Session 状态机 + 后台 Facilitator 运行
+- ✅ **CP4 + CP5** Workflow Design Session UI + Approve / Reject / Archive + Failure 降级提示
+- ✅ **CP6** Sprint 7 milestone 文档 + 全项目收尾
 
 ---
 
 ## 2. 当前阻塞 / 待决议
 
-Sprint 7 启动前需要拍板：
+无待决议项；MVP（Sprint 1~7）完成。
 
-| # | 议题 | 建议默认 | 状态 |
-|---|------|---------|------|
-| Q-8 | Facilitator Session 触发方式 | 手动触发（用户掌控感） | ⏳ 待拍板 |
-| Q-9 | Facilitator Session 最大时长 / token 消耗 | 30 分钟 / 总轮数 ≤ 12 | ⏳ 待拍板 |
+后续 Sprint 8+ 主题（远期路线）：
+
+- Facilitator 多轮真对话（升级 Sprint 7 single-shot）
+- R-18 多 runtime 适配（Codex / Claude / Kimi / Copilot / Gemini）
+- R-19 跨 Project 全局视图（Kanban）
+- B-1 Worktree 多 Agent 隔离
+- Agent / Workflow Marketplace
 
 ### 已决议（历史，仅供检索）
 
@@ -47,14 +50,22 @@ Sprint 7 启动前需要拍板：
 | Q-5 ✅ | System Agent token 配额 | 独立 timeout，不计入 per-Agent 配额 | 2026-04-30 |
 | Q-6 ✅ | Coach Apply 后能否回滚 | 能；`agent_feedback.description_before` 创建时快照保存 | 2026-04-30 |
 | Q-7 ✅ | Scribe lessons 跨 Project 共享 | 默认 Project-private | 2026-04-30 |
-
-### 后续 Sprint 待决议（不阻塞当前）
-
-- Q-8（Facilitator 触发方式）— Sprint 7 启动前再决议
+| Q-8 ✅ | Facilitator Session 触发方式 | 手动 (`✨ From Team Discussion` 按钮) | 2026-04-30 |
+| Q-9 ✅ | Facilitator Session 时长 / 轮数 | 单次 spawn，`FACILITATOR_TIMEOUT_MS = 90s`；多轮版本留 Sprint 8+ | 2026-04-30 |
 
 ---
 
 ## 3. 已完成 Sprint 摘要
+
+### Sprint 7 — Team-First-Collaborative Workflow Design (Facilitator)
+
+详见 [`sprint7-milestone.md`](sprint7-milestone.md)。
+
+- `workflow_sessions`（schema_version → 9）
+- Facilitator System Agent（单次 spawn 模拟 round-table 产 YAML）
+- WorkflowsPage `✨ From Team Discussion` 按钮 + Session 卡片状态机
+- Approve 写入 `workflows` 表 + 自动 derive responsibilities
+- Failure 降级到 Sprint 2 Template 路径
 
 ### Sprint 6 — Onboarding Loop + Skill Matrix
 
@@ -131,23 +142,24 @@ Sprint 3 完成后剩余的延后项（详见 [`sprint3-milestone.md`](sprint3-m
 
 ## 5. 下一步建议
 
-Sprint 6 已完成。进入 Sprint 7 — Team-First-Collaborative Workflow Design。
+MVP（Sprint 1~7）全部完成。后续按需选择：
 
-### Sprint 7 主体（6~8 天）
+### A. Sprint 8+ 远期路线（按用户优先级）
 
-1. **CP1** `workflow_sessions` 表（schema_version → 9）+ Facilitator 入口
-2. **CP2** Facilitator System Agent（多轮对话主持产 YAML draft）
-3. **CP3** Workflow Design Session 状态机（轮次推进 / 收敛 / 终止）
-4. **CP4** Session 结束后 YAML draft Approve UI（写入 workflows 表）
-5. **CP5** Failure 降级提示 + Session 归档
-6. **CP6** Sprint 7 milestone + 全项目收尾
+- **Facilitator 真多轮对话**：升级 Sprint 7 single-shot 为多轮 spawn + thread 化（涉及 thread 编排 + token 预算 + 中断恢复）
+- **R-18 多 runtime 适配**：当前仅 Cursor；增加 Codex / Claude / Kimi / Copilot / Gemini Adapter
+- **R-19 跨 Project 全局视图**：Kanban / Threads / Tasks 跨 Project 聚合
+- **B-1 Worktree 多 Agent 隔离**：解决多 Agent 并发改同一 repo 冲突
+- **B-3 任务依赖图**：`tasks.blocked_by` + 自动 unblock
+- **Agent / Workflow Marketplace**：分享 YAML / Team Template
+- **跨 Project Description / Lessons 迁移**：演化经验复用
 
-详细范围与验收见 [`PLAN.md` Sprint 7](../PLAN.md#sprint-7-team-first-collaborative-workflow-designfacilitator)。
+### B. 持续运维项
 
-### 启动前 checklist
+- 文档同步 / dependency 升级 / lint warnings 清理（可选）
+- 真实使用反馈驱动 UX 打磨（无固定计划）
 
-- ⏳ **Q-8** 拍板（Facilitator Session 触发方式 — 建议手动）
-- ⏳ **Q-9** 拍板（Session 最大时长 / 总轮数）
+详见 [`PLAN.md` §Sprint 8+](../PLAN.md#sprint-8-远期路线)。
 
 ---
 

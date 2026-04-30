@@ -101,7 +101,7 @@ Layer 1:  Goal            项目目标（一等公民，必填）
 | **Sprint 4** — Delivery Loop (Scribe) | 沉淀 + Intelligence Tab | ✅ **已交付**（见 [`docs/sprint4-milestone.md`](docs/sprint4-milestone.md)） |
 | **Sprint 5** — Evolution Loop | Evaluator + Coach + Description 演化 | ✅ **已交付**（见 [`docs/sprint5-milestone.md`](docs/sprint5-milestone.md)） |
 | **Sprint 6** — Onboarding Loop + Skill Matrix | 新 Project 自动分析 + 能力地图 | ✅ **已交付**（见 [`docs/sprint6-milestone.md`](docs/sprint6-milestone.md)） |
-| **Sprint 7** — Team-First-Collaborative Workflow Design | Facilitator 主持的 Workflow Design Session | ⏳ **当前焦点** |
+| **Sprint 7** — Team-First-Collaborative Workflow Design | Facilitator 主持的 Workflow Design Session | ✅ **已交付**（见 [`docs/sprint7-milestone.md`](docs/sprint7-milestone.md)） |
 | Sprint 8+ — 远期路线 | 跨 Project 经验迁移 / 多 runtime / Worktree 隔离 / Marketplace | 远期 |
 
 ### Sprint 启动前必做 checklist
@@ -198,34 +198,13 @@ CP1 ~ CP6 已交付：`project_onboarding` / `agent_skills` 表（schema_version
 
 ---
 
-## Sprint 7: Team-First-Collaborative Workflow Design（Facilitator）（当前焦点）
+### Sprint 7：Team-First-Collaborative Workflow Design（Facilitator）✅
 
-**目标**：Team 成员能自己讨论出 Workflow，不依赖 Template。这是 Slark 相对 slock.ai / Cursor / ClawTeam 的**核心差异化能力**。
+CP1 ~ CP6 已交付：`workflow_sessions` 表（schema_version → 9）+ Facilitator System Agent + WorkflowsPage `✨ From Team Discussion` 按钮 + Approve / Reject / Archive。
 
-**战略价值**：Slark "Programmable AI Team OS" 最独特的机制落地。
+详细 → [`docs/sprint7-milestone.md`](docs/sprint7-milestone.md)。
 
-**预估工期**：6~8 工作日
-
-### 范围
-
-- [ ] **Facilitator System Agent**
-- [ ] "Create Workflow from Team Discussion" 入口
-- [ ] Workflow Design Session 对话流（Session thread 独立）
-- [ ] Session 结束后 YAML draft 用户 Approve → 写入 `workflows` 表
-- [ ] 失败降级：Facilitator 卡住或用户 Reject → 提示"请使用 Sprint 2 Template 路径"
-
-### 启动前待决
-
-- Q-8：Facilitator 触发方式（建议手动）
-- Q-9（新）：Session 最大时长 / 最大 token 消耗
-
-### 验收
-
-- [ ] 用户点 "Create Workflow from Team Discussion" → 进入 Session thread
-- [ ] Facilitator 主持 Team 讨论（5~15 分钟内收敛）
-- [ ] 产出 YAML draft 且可解析
-- [ ] 用户 Approve 后 `workflows` 表多一条记录
-- [ ] Reject 后 Session thread 归档，不污染 project 知识池
+> **MVP 完成（Sprint 1~7）**。下一步进入 **Sprint 8+ 远期路线**。
 
 ---
 
