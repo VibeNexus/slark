@@ -9,6 +9,7 @@ import { wsClient } from '../lib/ws';
 import { stopAllAgents } from '../lib/api';
 import { projectChannelPath, projectIndexPath } from '../lib/routes';
 import { useChannelCommands } from '../lib/useChannelCommands';
+import { useWorkflowsStore } from '../stores/workflows';
 import { ChannelHeader } from '../components/ChannelHeader';
 import { MessageList } from '../components/MessageList';
 import { MessageInput } from '../components/MessageInput';
@@ -64,6 +65,37 @@ export function ChannelPage() {
 
   // hook：必须在所有 early return 之前调用
   const channelCommands = useChannelCommands(channelId ?? null, false);
+
+  // CP5：监听 workflow runs，新触发的 run 自动跳到对应 thread（清掉 TD-11）
+  const runsByThread = useWorkflowsStore((s) => s.runsByThread);
+  const markAutoJumped = useWorkflowsStore((s) => s.markAutoJumped);
+  const hasAutoJumped = useWorkflowsStore((s) => s.hasAutoJumped);
+
+  useEffect(() => {
+    if (!channelId) return;
+    if (threadId) return; // 用户已经在 thread 里
+    // 找该 channel 内最近一个未自动跳过的 active run
+    let candidate: { runId: number; threadId: string } | null = null;
+    let bestStart = 0;
+    for (const r of runsByThread.values()) {
+      if (r.channel_id !== channelId) continue;
+      if (!r.thread_id) continue;
+      if (r.status !== 'running' && r.status !== 'awaiting_approval') continue;
+      if (hasAutoJumped(r.id)) continue;
+      // 5 秒窗口避免老 run（页面刚加载时 fetch 出来的旧 active run）
+      if (Date.now() - r.started_at > 5000) continue;
+      if (r.started_at > bestStart) {
+        bestStart = r.started_at;
+        candidate = { runId: r.id, threadId: r.thread_id };
+      }
+    }
+    if (candidate) {
+      markAutoJumped(candidate.runId);
+      const next = new URLSearchParams(params);
+      next.set('thread', candidate.threadId);
+      setParams(next, { replace: true });
+    }
+  }, [channelId, threadId, runsByThread, markAutoJumped, hasAutoJumped, params, setParams]);
 
   if (!channelId || !projectName) return null;
 
