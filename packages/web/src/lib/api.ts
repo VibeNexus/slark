@@ -6,12 +6,14 @@ import type {
   Agent,
   AgentActivity,
   AgentFeedback,
+  AgentSkill,
   ChatMessage,
   Channel,
   Decision,
   Lesson,
   LessonKind,
   Project,
+  ProjectOnboarding,
   ReviewStatus,
   RuntimeDetection,
   Task,
@@ -405,3 +407,26 @@ export const rejectAgentFeedback = (id: number) =>
 
 export const rollbackAgentFeedback = (id: number) =>
   request<AgentFeedback>(`/api/feedback/${id}/rollback`, { method: 'POST' });
+
+// Onboarding (Sprint 6 CP3)
+export const getProjectOnboarding = (projectId: string) =>
+  request<ProjectOnboarding | { project_id: string; ready: false }>(
+    `/api/projects/${projectId}/onboarding`,
+  );
+
+export const runOnboarder = (projectId: string) =>
+  request<ProjectOnboarding | null>(`/api/projects/${projectId}/onboarding/run`, {
+    method: 'POST',
+  });
+
+// Skill Matrix (Sprint 6 CP4 / CP5)
+export const listAgentSkills = (agentId: string) =>
+  request<AgentSkill[]>(`/api/agents/${agentId}/skills`);
+
+export const listProjectSkills = (projectId: string) =>
+  request<AgentSkill[]>(`/api/projects/${projectId}/skills`);
+
+export const suggestAgentsForKeyword = (projectId: string, keyword: string) =>
+  request<Array<{ agent_id: string; total_count: number; matched_keys: string[] }>>(
+    `/api/projects/${projectId}/skill-suggest?keyword=${encodeURIComponent(keyword)}`,
+  );

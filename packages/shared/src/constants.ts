@@ -56,6 +56,9 @@ export const EVALUATOR_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** Coach 触发条件：同 tag 至少 N 次 negative observation */
 export const COACH_NEGATIVE_THRESHOLD = 3;
 
+/** Onboarder spawn 超时 */
+export const ONBOARDER_TIMEOUT_MS = 60_000;
+
 // =============================================================================
 // 端口与数据目录（D-10）
 // =============================================================================

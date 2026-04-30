@@ -18,8 +18,9 @@
 import type { FastifyInstance } from 'fastify';
 import type { Database } from 'better-sqlite3';
 import { GOAL_MAX_LENGTH } from '@slark/shared';
-import { projectRepo } from '../db/repos.js';
+import { onboardingRepo, projectRepo } from '../db/repos.js';
 import { suggestTeam } from '../system-agents/team-architect.js';
+import { runOnboarderForProject } from '../system-agents/onboarder.js';
 import { importBuiltinsForProject } from '../workflows/builtin-import.js';
 
 const NAME_SLUG_RE = /^[a-z0-9_-]+$/;
@@ -118,8 +119,43 @@ export async function projectRoutes(app: FastifyInstance, db: Database): Promise
       );
     }
 
+    // Sprint 6 CP3：异步触发 Onboarder（不阻塞 Project 创建响应）
+    void runOnboarderForProject(db, project.id, {
+      info: (m) => req.log.info(m),
+      warn: (m) => req.log.warn(m),
+    }).catch((e: Error) => req.log.warn(`[onboarder] ${e.message}`));
+
     reply.code(201);
     return project;
+  });
+
+  // GET / POST onboarding（Sprint 6 CP3）
+  app.get('/api/projects/:id/onboarding', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!projectRepo.getById(db, id)) {
+      reply.code(404);
+      return { error: 'project not found' };
+    }
+    const onb = onboardingRepo.getByProject(db, id);
+    return onb ?? { project_id: id, ready: false };
+  });
+
+  app.post('/api/projects/:id/onboarding/run', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!projectRepo.getById(db, id)) {
+      reply.code(404);
+      return { error: 'project not found' };
+    }
+    try {
+      await runOnboarderForProject(db, id, {
+        info: (m) => req.log.info(m),
+        warn: (m) => req.log.warn(m),
+      });
+      return onboardingRepo.getByProject(db, id);
+    } catch (e) {
+      reply.code(500);
+      return { error: (e as Error).message };
+    }
   });
 
   // 更新
