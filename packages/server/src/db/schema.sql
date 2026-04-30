@@ -150,3 +150,50 @@ CREATE INDEX IF NOT EXISTS idx_agent_runs_active
   WHERE ended_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_agent_runs_by_channel
   ON agent_runs(channel_id, started_at DESC);
+
+-- =============================================================================
+-- 11. workflows (Sprint 2 引入，对齐 docs/technical-decisions.md D-16)
+--
+-- 声明式 YAML 甬道。同一 project_id 内 trigger_command 唯一。
+-- source: 'builtin' = Slark 内置模板（feature-development / bug-fix / research）；
+--         'user' = 用户自建 / Facilitator 产出（Sprint 7）。
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS workflows (
+  id              TEXT PRIMARY KEY,
+  project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name            TEXT NOT NULL,
+  description     TEXT,
+  trigger_command TEXT NOT NULL,
+  definition_yaml TEXT NOT NULL,
+  source          TEXT NOT NULL DEFAULT 'user'
+                  CHECK(source IN ('builtin','user')),
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL,
+  UNIQUE(project_id, trigger_command)
+);
+CREATE INDEX IF NOT EXISTS idx_workflows_project ON workflows(project_id);
+
+-- =============================================================================
+-- 12. workflow_runs (Sprint 2 引入)
+--
+-- Workflow 的执行实例。绑定到一个 channel 的 thread。
+-- state_json 存每一步的 message_id / 用户反馈 / abort 原因等结构化状态。
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  workflow_id     TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  channel_id      TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  thread_id       TEXT REFERENCES messages(id) ON DELETE CASCADE,
+  status          TEXT NOT NULL
+                  CHECK(status IN ('running','awaiting_approval','completed','aborted','failed')),
+  current_step    TEXT,
+  started_by      TEXT NOT NULL,
+  started_at      INTEGER NOT NULL,
+  ended_at        INTEGER,
+  state_json      TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_channel ON workflow_runs(channel_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_thread ON workflow_runs(thread_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_active
+  ON workflow_runs(channel_id, status)
+  WHERE status IN ('running','awaiting_approval');

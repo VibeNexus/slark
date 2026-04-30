@@ -21,6 +21,10 @@ import type {
   MessageMetadata,
   Project,
   Task,
+  Workflow,
+  WorkflowRun,
+  WorkflowRunStatus,
+  WorkflowSource,
 } from '@slark/shared';
 import type {
   ReasoningEffort,
@@ -896,5 +900,291 @@ export const agentRunRepo = {
       )
       .all(channelId) as AgentRunRow[];
     return rows.map(rowToAgentRun);
+  },
+};
+
+// =============================================================================
+// Workflows (Sprint 2 / D-16)
+// =============================================================================
+
+interface WorkflowRow {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  trigger_command: string;
+  definition_yaml: string;
+  source: string;
+  created_at: number;
+  updated_at: number;
+}
+
+function rowToWorkflow(r: WorkflowRow): Workflow {
+  return {
+    id: r.id,
+    project_id: r.project_id,
+    name: r.name,
+    description: r.description,
+    trigger_command: r.trigger_command,
+    definition_yaml: r.definition_yaml,
+    source: r.source as WorkflowSource,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  };
+}
+
+export const workflowRepo = {
+  list(db: Database): Workflow[] {
+    return (db.prepare('SELECT * FROM workflows ORDER BY created_at ASC').all() as WorkflowRow[])
+      .map(rowToWorkflow);
+  },
+
+  listByProject(db: Database, projectId: string): Workflow[] {
+    return (
+      db
+        .prepare('SELECT * FROM workflows WHERE project_id = ? ORDER BY created_at ASC')
+        .all(projectId) as WorkflowRow[]
+    ).map(rowToWorkflow);
+  },
+
+  getById(db: Database, id: string): Workflow | null {
+    const row = db.prepare('SELECT * FROM workflows WHERE id = ?').get(id) as
+      | WorkflowRow
+      | undefined;
+    return row ? rowToWorkflow(row) : null;
+  },
+
+  /** 按 project + trigger 查（用于 MessageRouter 命令分发）*/
+  getByTrigger(db: Database, projectId: string, triggerCommand: string): Workflow | null {
+    const row = db
+      .prepare('SELECT * FROM workflows WHERE project_id = ? AND trigger_command = ?')
+      .get(projectId, triggerCommand) as WorkflowRow | undefined;
+    return row ? rowToWorkflow(row) : null;
+  },
+
+  create(
+    db: Database,
+    input: {
+      id?: string;
+      project_id: string;
+      name: string;
+      description?: string | null;
+      trigger_command: string;
+      definition_yaml: string;
+      source?: WorkflowSource;
+    },
+  ): Workflow {
+    const id = input.id ?? nanoid();
+    const ts = now();
+    db.prepare(
+      `INSERT INTO workflows (id, project_id, name, description, trigger_command, definition_yaml, source, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      input.project_id,
+      input.name,
+      input.description ?? null,
+      input.trigger_command,
+      input.definition_yaml,
+      input.source ?? 'user',
+      ts,
+      ts,
+    );
+    const wf = this.getById(db, id);
+    if (!wf) throw new Error(`workflow ${id} insert failed`);
+    return wf;
+  },
+
+  update(
+    db: Database,
+    id: string,
+    patch: Partial<{
+      name: string;
+      description: string | null;
+      trigger_command: string;
+      definition_yaml: string;
+    }>,
+  ): Workflow | null {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    if (patch.name !== undefined) {
+      fields.push('name = ?');
+      values.push(patch.name);
+    }
+    if (patch.description !== undefined) {
+      fields.push('description = ?');
+      values.push(patch.description);
+    }
+    if (patch.trigger_command !== undefined) {
+      fields.push('trigger_command = ?');
+      values.push(patch.trigger_command);
+    }
+    if (patch.definition_yaml !== undefined) {
+      fields.push('definition_yaml = ?');
+      values.push(patch.definition_yaml);
+    }
+    if (!fields.length) return this.getById(db, id);
+    fields.push('updated_at = ?');
+    values.push(now());
+    values.push(id);
+    db.prepare(`UPDATE workflows SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    return this.getById(db, id);
+  },
+
+  remove(db: Database, id: string): void {
+    db.prepare('DELETE FROM workflows WHERE id = ?').run(id);
+  },
+};
+
+// =============================================================================
+// Workflow Runs (Sprint 2)
+// =============================================================================
+
+interface WorkflowRunRow {
+  id: number;
+  workflow_id: string;
+  channel_id: string;
+  thread_id: string | null;
+  status: string;
+  current_step: string | null;
+  started_by: string;
+  started_at: number;
+  ended_at: number | null;
+  state_json: string;
+}
+
+function rowToWorkflowRun(r: WorkflowRunRow): WorkflowRun {
+  return {
+    id: r.id,
+    workflow_id: r.workflow_id,
+    channel_id: r.channel_id,
+    thread_id: r.thread_id,
+    status: r.status as WorkflowRunStatus,
+    current_step: r.current_step,
+    started_by: r.started_by,
+    started_at: r.started_at,
+    ended_at: r.ended_at,
+    state_json: r.state_json,
+  };
+}
+
+export const workflowRunRepo = {
+  getById(db: Database, id: number): WorkflowRun | null {
+    const row = db.prepare('SELECT * FROM workflow_runs WHERE id = ?').get(id) as
+      | WorkflowRunRow
+      | undefined;
+    return row ? rowToWorkflowRun(row) : null;
+  },
+
+  listByWorkflow(db: Database, workflowId: string, limit = 50): WorkflowRun[] {
+    const rows = db
+      .prepare(
+        'SELECT * FROM workflow_runs WHERE workflow_id = ? ORDER BY started_at DESC LIMIT ?',
+      )
+      .all(workflowId, limit) as WorkflowRunRow[];
+    return rows.map(rowToWorkflowRun);
+  },
+
+  listByChannel(db: Database, channelId: string, limit = 50): WorkflowRun[] {
+    const rows = db
+      .prepare(
+        'SELECT * FROM workflow_runs WHERE channel_id = ? ORDER BY started_at DESC LIMIT ?',
+      )
+      .all(channelId, limit) as WorkflowRunRow[];
+    return rows.map(rowToWorkflowRun);
+  },
+
+  /** 找 channel 当前活跃 run（running / awaiting_approval），可选按 thread 过滤 */
+  getActive(
+    db: Database,
+    channelId: string,
+    threadId?: string | null,
+  ): WorkflowRun | null {
+    const sql = threadId
+      ? `SELECT * FROM workflow_runs
+         WHERE channel_id = ? AND thread_id = ?
+         AND status IN ('running','awaiting_approval')
+         ORDER BY started_at DESC LIMIT 1`
+      : `SELECT * FROM workflow_runs
+         WHERE channel_id = ? AND status IN ('running','awaiting_approval')
+         ORDER BY started_at DESC LIMIT 1`;
+    const row = (
+      threadId
+        ? db.prepare(sql).get(channelId, threadId)
+        : db.prepare(sql).get(channelId)
+    ) as WorkflowRunRow | undefined;
+    return row ? rowToWorkflowRun(row) : null;
+  },
+
+  create(
+    db: Database,
+    input: {
+      workflow_id: string;
+      channel_id: string;
+      thread_id?: string | null;
+      started_by: string;
+      current_step: string;
+      state_json?: string;
+    },
+  ): WorkflowRun {
+    const ts = now();
+    const result = db
+      .prepare(
+        `INSERT INTO workflow_runs
+         (workflow_id, channel_id, thread_id, status, current_step, started_by, started_at, ended_at, state_json)
+         VALUES (?, ?, ?, 'running', ?, ?, ?, NULL, ?)`,
+      )
+      .run(
+        input.workflow_id,
+        input.channel_id,
+        input.thread_id ?? null,
+        input.current_step,
+        input.started_by,
+        ts,
+        input.state_json ?? '{}',
+      );
+    const run = this.getById(db, Number(result.lastInsertRowid));
+    if (!run) throw new Error('workflow_run insert failed');
+    return run;
+  },
+
+  /** 更新 status / current_step / state_json（部分） */
+  update(
+    db: Database,
+    id: number,
+    patch: Partial<{
+      status: WorkflowRunStatus;
+      current_step: string | null;
+      state_json: string;
+      thread_id: string | null;
+      ended: boolean;
+    }>,
+  ): WorkflowRun | null {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    if (patch.status !== undefined) {
+      fields.push('status = ?');
+      values.push(patch.status);
+    }
+    if (patch.current_step !== undefined) {
+      fields.push('current_step = ?');
+      values.push(patch.current_step);
+    }
+    if (patch.state_json !== undefined) {
+      fields.push('state_json = ?');
+      values.push(patch.state_json);
+    }
+    if (patch.thread_id !== undefined) {
+      fields.push('thread_id = ?');
+      values.push(patch.thread_id);
+    }
+    if (patch.ended) {
+      fields.push('ended_at = ?');
+      values.push(now());
+    }
+    if (!fields.length) return this.getById(db, id);
+    values.push(id);
+    db.prepare(`UPDATE workflow_runs SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    return this.getById(db, id);
   },
 };

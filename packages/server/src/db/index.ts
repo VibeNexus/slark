@@ -5,6 +5,7 @@
  *   1 - v0 MVP 初始 schema（channels / agents / messages / tasks / agent_activity / meta 等）
  *   2 - v1.0 Sprint 1 CP1/CP3：新增 projects / agent_runs 表、agent_activity 加 channel_id 列
  *   3 - v1.0 Sprint 2 CP8.3：删除 agents.status 字段（状态从 agent_runs 派生，对齐 D-1）
+ *   4 - v1.0 Sprint 2 CP1：新增 workflows / workflow_runs 表（D-16）
  */
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -22,7 +23,7 @@ const SCHEMA_CANDIDATES = [
 ];
 const SCHEMA_PATH = SCHEMA_CANDIDATES.find((p) => existsSync(p));
 
-const CURRENT_SCHEMA_VERSION = '3';
+const CURRENT_SCHEMA_VERSION = '4';
 
 let _db: DB | null = null;
 

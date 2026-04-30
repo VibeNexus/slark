@@ -206,6 +206,103 @@ export interface RuntimeDetection {
 }
 
 // =============================================================================
+// Workflow（Sprint 2 / D-16 — 声明式 YAML 甬道）
+// =============================================================================
+
+export type WorkflowSource = 'builtin' | 'user';
+
+/** 数据库行（不含 parsed YAML） */
+export interface Workflow {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  /** 触发命令，如 "/new-feature"；同 project 内唯一 */
+  trigger_command: string;
+  /** 原始 YAML 文本 */
+  definition_yaml: string;
+  /** 'builtin'（随 Slark 发行）或 'user'（用户自建 / Facilitator 产出） */
+  source: WorkflowSource;
+  created_at: number;
+  updated_at: number;
+}
+
+/** YAML 解析后的 step（供 Runner 消费） */
+export interface WorkflowStep {
+  id: string;
+  /** "@AgentName" 或 "local-user" */
+  owner: string;
+  /** 'approve_or_reject' = 等用户批准；'close_thread' = 终止；undefined = 普通执行 */
+  action?: 'approve_or_reject' | 'close_thread';
+  /** 完成后跳转 step id */
+  on_complete?: string;
+  /** approve_or_reject 时：用户批准 → 跳转 step id */
+  on_approve?: string;
+  /** approve_or_reject 时：用户拒绝 → 跳转 step id */
+  on_reject?: string;
+  /** 引用前一 step 的输出作为输入（仅 documentational，runner 用 state_json 路由）*/
+  input?: string;
+  /** 输出标签，便于其他 step 引用 */
+  output?: string;
+  /** Optional 描述，便于 UI 展示 */
+  description?: string;
+}
+
+/** YAML 解析后的完整定义 */
+export interface WorkflowDefinition {
+  /** 软声明，YAML 顶层 `version: "1"`；Runner 用于将来兼容 */
+  version: string;
+  name: string;
+  description?: string;
+  trigger: { command: string };
+  steps: WorkflowStep[];
+}
+
+export type WorkflowRunStatus =
+  | 'running'
+  | 'awaiting_approval'
+  | 'completed'
+  | 'aborted'
+  | 'failed';
+
+export interface WorkflowRun {
+  id: number;
+  workflow_id: string;
+  channel_id: string;
+  /** Thread 根消息 ID（绑定到一条主线消息生成的 thread）*/
+  thread_id: string | null;
+  status: WorkflowRunStatus;
+  /** 当前执行 step id（completed/aborted/failed 时为最后一步）*/
+  current_step: string | null;
+  /** 'local-user' 或 agent_id */
+  started_by: string;
+  started_at: number;
+  ended_at: number | null;
+  /** 各 step 的产出 / 用户输入快照（JSON） */
+  state_json: string;
+}
+
+/** state_json 解构后（Runner 内部用） */
+export interface WorkflowRunState {
+  /** 触发时用户输入的指令尾巴（如 `/new-feature add OAuth` 后面的 'add OAuth'）*/
+  initial_input?: string;
+  /** 每一步的最终消息 id + 摘要（用于上下文链路）*/
+  step_outputs: Record<
+    string,
+    {
+      message_id: string;
+      summary?: string;
+      ended_at: number;
+      status: 'completed' | 'approved' | 'rejected' | 'failed';
+    }
+  >;
+  /** Reject 时的反馈，注入下一轮 spawn 的 prompt 上下文 */
+  last_rejection_reason?: string;
+  /** Abort 原因 */
+  abort_reason?: string;
+}
+
+// =============================================================================
 // Team Architect System Agent（v1.0 / D-15 / D-19）
 // =============================================================================
 

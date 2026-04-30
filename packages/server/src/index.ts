@@ -21,6 +21,7 @@ import { taskRoutes } from './routes/tasks.js';
 import { runtimesRoutes } from './routes/runtimes.js';
 import { extraRoutes } from './routes/extras.js';
 import { projectRoutes } from './routes/projects.js';
+import { workflowRoutes } from './routes/workflows.js';
 import { registerWSRoute } from './ws/handler.js';
 import { hub } from './ws/hub.js';
 import { concurrencyQueue } from './agents/queue.js';
@@ -63,6 +64,7 @@ async function main() {
   await channelRoutes(app, db);
   await agentRoutes(app, db);
   await taskRoutes(app, db);
+  await workflowRoutes(app, db);
   await extraRoutes(app, db);
 
   // WebSocket
