@@ -23,6 +23,7 @@ import type {
   Runtime,
   Workflow,
   WorkflowRun,
+  WorkflowSession,
 } from '@slark/shared';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -430,3 +431,35 @@ export const suggestAgentsForKeyword = (projectId: string, keyword: string) =>
   request<Array<{ agent_id: string; total_count: number; matched_keys: string[] }>>(
     `/api/projects/${projectId}/skill-suggest?keyword=${encodeURIComponent(keyword)}`,
   );
+
+// Workflow Sessions (Sprint 7)
+
+export const listProjectWorkflowSessions = (projectId: string) =>
+  request<WorkflowSession[]>(`/api/projects/${projectId}/workflow-sessions`);
+
+export const createWorkflowSession = (projectId: string, goalInput: string) =>
+  request<WorkflowSession>(`/api/projects/${projectId}/workflow-sessions`, {
+    method: 'POST',
+    body: JSON.stringify({ goal_input: goalInput }),
+  });
+
+export const getWorkflowSession = (id: number) =>
+  request<WorkflowSession>(`/api/workflow-sessions/${id}`);
+
+export const approveWorkflowSession = (
+  id: number,
+  patch?: { name?: string; trigger_command?: string },
+) =>
+  request<{ session: WorkflowSession; workflow: Workflow }>(
+    `/api/workflow-sessions/${id}/approve`,
+    {
+      method: 'POST',
+      body: JSON.stringify(patch ?? {}),
+    },
+  );
+
+export const rejectWorkflowSession = (id: number) =>
+  request<WorkflowSession>(`/api/workflow-sessions/${id}/reject`, { method: 'POST' });
+
+export const archiveWorkflowSession = (id: number) =>
+  request<WorkflowSession>(`/api/workflow-sessions/${id}/archive`, { method: 'POST' });
