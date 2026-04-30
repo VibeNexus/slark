@@ -8,7 +8,8 @@ import { useSearchParams } from 'react-router-dom';
 import type { Agent, Task, TaskStatus } from '@slark/shared';
 import { TASK_STATES } from '@slark/shared';
 import { cn } from '../lib/cn';
-import { createTask, deleteTask, listTasks, updateTask } from '../lib/api';
+import { createTask, deleteTask, listTasks, suggestAgentsForKeyword, updateTask } from '../lib/api';
+import { useChannelsStore } from '../stores/channels';
 import { Dialog } from './Dialog';
 
 interface Props {
@@ -417,6 +418,39 @@ function NewTaskDialog({
   const [title, setTitle] = useState('');
   const [assignee, setAssignee] = useState<string>('');
   const [busy, setBusy] = useState(false);
+  // Sprint 6 CP5：基于 title 关键词推荐 assignee
+  const [suggestions, setSuggestions] = useState<
+    Array<{ agent_id: string; total_count: number; matched_keys: string[] }>
+  >([]);
+  const channels = useChannelsStore((s) => s.channels);
+  const projectId = channels.find((c) => c.id === channelId)?.project_id ?? null;
+
+  useEffect(() => {
+    if (!projectId) return;
+    const t = title.trim();
+    if (t.length < 3) {
+      setSuggestions([]);
+      return;
+    }
+    // 取标题里第一个长度 ≥ 3 的关键词（简单版）
+    const keyword = t.split(/[\s/]+/).find((s) => s.length >= 3) ?? '';
+    if (!keyword) {
+      setSuggestions([]);
+      return;
+    }
+    let cancelled = false;
+    const handle = setTimeout(() => {
+      void suggestAgentsForKeyword(projectId, keyword)
+        .then((rows) => {
+          if (!cancelled) setSuggestions(rows);
+        })
+        .catch(() => setSuggestions([]));
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [title, projectId]);
 
   const submit = async () => {
     if (!title.trim()) return;
@@ -430,6 +464,7 @@ function NewTaskDialog({
       onCreated(task);
       setTitle('');
       setAssignee('');
+      setSuggestions([]);
       onClose();
     } finally {
       setBusy(false);
@@ -470,6 +505,27 @@ function NewTaskDialog({
               </option>
             ))}
           </select>
+          {suggestions.length > 0 && (
+            <div className="mt-2 text-[11px] font-mono text-text-secondary">
+              <span>Suggested by Skill Matrix: </span>
+              {suggestions.slice(0, 3).map((s, i) => {
+                const agent = agents.find((a) => a.id === s.agent_id);
+                if (!agent) return null;
+                return (
+                  <button
+                    key={s.agent_id}
+                    type="button"
+                    onClick={() => setAssignee(s.agent_id)}
+                    title={`matched: ${s.matched_keys.join(', ')} · count ${s.total_count}`}
+                    className="ml-1 px-1.5 py-0.5 border-2 border-black rounded bg-accent-yellow hover:brightness-105"
+                  >
+                    @{agent.name} ({s.total_count})
+                    {i < Math.min(2, suggestions.length - 1) ? ' ' : ''}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
         <div className="flex justify-end gap-2 pt-3 border-t-2 border-black/10 -mx-5 px-5">
           <button

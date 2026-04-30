@@ -26,6 +26,7 @@ import { extraRoutes } from './routes/extras.js';
 import { feedbackRoutes } from './routes/feedback.js';
 import { intelligenceRoutes } from './routes/intelligence.js';
 import { projectRoutes } from './routes/projects.js';
+import { skillRoutes } from './routes/skills.js';
 import { workflowRoutes } from './routes/workflows.js';
 import { registerWSRoute } from './ws/handler.js';
 import { hub } from './ws/hub.js';
@@ -107,6 +108,7 @@ async function main() {
   await workflowRoutes(app, db);
   await intelligenceRoutes(app, db);
   await feedbackRoutes(app, db);
+  await skillRoutes(app, db);
   await extraRoutes(app, db);
 
   // WebSocket

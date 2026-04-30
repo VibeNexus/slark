@@ -27,6 +27,7 @@ import {
   lessonRepo,
   messageRepo,
   projectRepo,
+  skillRepo,
 } from '../db/repos.js';
 import { hub } from '../ws/hub.js';
 import { buildContext } from './context-builder.js';
@@ -346,6 +347,18 @@ export async function triggerAgent(
       })),
   };
 
+  // Sprint 6 CP4：从 tool_call 自动累积 agent_skills
+  if (project) {
+    try {
+      const keys = collectSkillKeysFromEvents(result.events, project.workspace_path);
+      for (const key of keys) {
+        skillRepo.bumpTouch(db, agent.id, project.id, key);
+      }
+    } catch (e) {
+      log.warn(`[engine] skill tracking failed: ${(e as Error).message}`);
+    }
+  }
+
   const finalContent = fullText || (finalOk ? '(no response)' : 'Agent failed to produce a response.');
   messageRepo.updateContent(db, placeholder.id, finalContent, finalMetadata);
   const updated = messageRepo.getById(db, placeholder.id) ?? placeholder;
@@ -423,6 +436,63 @@ function resolveCwd(db: Database, projectId: string | null, channelId: string): 
     );
   }
   return project.workspace_path;
+}
+
+/**
+ * Sprint 6 CP4：从 tool_call.completed 事件抽取 skill_key（顶级 / 二级路径段）。
+ *
+ * 启发式：
+ *   - 找 args 里的 path / file / cwd 字段（adapter 解析后通常会塞 args，可惜 cursor-adapter
+ *     在 result.events 里没附带 args，只在 metadata.tool_calls 中。这里改读 result.result 文本
+ *     近似匹配 workspace 内相对路径的写法。
+ *
+ * 折中：result 文本里抓 `<workspace>/foo/bar/...` 的相对路径头一两段。
+ *   - 若结果文本没有路径，则 skip。
+ *   - dedup 后返回（同一 spawn 内多次写同一目录只 +1）。
+ */
+function collectSkillKeysFromEvents(
+  events: ReadonlyArray<CLIEvent>,
+  workspacePath: string,
+): string[] {
+  const keys = new Set<string>();
+  const wsAbs = workspacePath.replace(/\/$/, '');
+  for (const e of events) {
+    if (e.type !== 'tool.completed') continue;
+    const haystack = `${e.result ?? ''}`;
+    if (!haystack) continue;
+    // 抓所有看起来像 workspace 内相对路径的片段
+    // 形式 1：绝对路径包含 workspacePath
+    const absRe = new RegExp(
+      `${escapeRegex(wsAbs)}\\/([\\w.-]+(?:\\/[\\w.-]+)?)`,
+      'g',
+    );
+    let m;
+    while ((m = absRe.exec(haystack))) {
+      const seg = m[1];
+      if (seg) keys.add(normalizeKey(seg));
+    }
+    // 形式 2：相对路径直接出现（启发式：以 src/ tests/ scripts/ 等开头）
+    const relRe = /(?:^|[\s,(])((?:src|tests?|spec|scripts?|packages|apps|lib|docs|public)\/[\w.-]+(?:\/[\w.-]+)?)/g;
+    while ((m = relRe.exec(haystack))) {
+      const seg = m[1];
+      if (seg) keys.add(normalizeKey(seg));
+    }
+  }
+  return Array.from(keys).slice(0, 12);
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeKey(seg: string): string {
+  // 取前两段，掐掉文件扩展名
+  const parts = seg.split('/').slice(0, 2);
+  if (parts[1] && /\./.test(parts[1])) {
+    // 是文件 → 只留 dir
+    return parts[0] ?? seg;
+  }
+  return parts.join('/');
 }
 
 function emitSystemError(
