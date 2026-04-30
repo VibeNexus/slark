@@ -100,8 +100,8 @@ Layer 1:  Goal            项目目标（一等公民，必填）
 | **Sprint 3** — Responsibility + User Intervention | 批准流 + 用户介入 + Workflow Import/Export | ✅ **已交付**（见 [`docs/sprint3-milestone.md`](docs/sprint3-milestone.md)） |
 | **Sprint 4** — Delivery Loop (Scribe) | 沉淀 + Intelligence Tab | ✅ **已交付**（见 [`docs/sprint4-milestone.md`](docs/sprint4-milestone.md)） |
 | **Sprint 5** — Evolution Loop | Evaluator + Coach + Description 演化 | ✅ **已交付**（见 [`docs/sprint5-milestone.md`](docs/sprint5-milestone.md)） |
-| **Sprint 6** — Onboarding Loop + Skill Matrix | 新 Project 自动分析 + 能力地图 | ⏳ **当前焦点** |
-| Sprint 7 — Team-First-Collaborative Workflow Design | Facilitator 主持的 Workflow Design Session | 规划 |
+| **Sprint 6** — Onboarding Loop + Skill Matrix | 新 Project 自动分析 + 能力地图 | ✅ **已交付**（见 [`docs/sprint6-milestone.md`](docs/sprint6-milestone.md)） |
+| **Sprint 7** — Team-First-Collaborative Workflow Design | Facilitator 主持的 Workflow Design Session | ⏳ **当前焦点** |
 | Sprint 8+ — 远期路线 | 跨 Project 经验迁移 / 多 runtime / Worktree 隔离 / Marketplace | 远期 |
 
 ### Sprint 启动前必做 checklist
@@ -190,32 +190,15 @@ CP1 ~ CP6 已交付：`agent_observations` / `agent_feedback` 表（schema_versi
 
 ---
 
-## Sprint 6: Onboarding Loop + Skill Matrix（当前焦点）
+### Sprint 6：Onboarding Loop + Skill Matrix ✅
 
-**目标**：新 Project 自动生成 onboarding 包；Agent 能力地图自动维护。
+CP1 ~ CP6 已交付：`project_onboarding` / `agent_skills` 表（schema_version → 8）+ Onboarder System Agent + Project 创建异步触发 + 卡片 UI + tool_call 自动统计 + Create Task 智能推荐。
 
-**预估工期**：5~7 工作日
-
-### 范围
-
-- [ ] **Onboarder System Agent**
-  - 触发：Create Project 后第一个 Agent spawn 前
-  - 输入：workspace_path 下的 README.md / package.json / git log 最近 N commit
-  - 输出：`project_onboarding` 表
-- [ ] `agent_skills` 表
-  - tool_call 后自动统计该 Agent 在哪些目录 / 模块下工作过
-- [ ] Create Task 智能推荐 assignee
-  - 关键词匹配 agent_skills.skill_key
-
-### 验收
-
-- [ ] 在一个真实 git 仓库创建 Project，Onboarding 卡片正确显示技术栈
-- [ ] Agent 在 `src/auth/` 下读写多次后，agent_skills 表有 'auth/' 记录
-- [ ] Create Task 输入 "fix auth bug"，assignee 下拉自动推荐之前在 auth/ 工作的 Agent
+详细 → [`docs/sprint6-milestone.md`](docs/sprint6-milestone.md)。
 
 ---
 
-## Sprint 7: Team-First-Collaborative Workflow Design（Facilitator）
+## Sprint 7: Team-First-Collaborative Workflow Design（Facilitator）（当前焦点）
 
 **目标**：Team 成员能自己讨论出 Workflow，不依赖 Template。这是 Slark 相对 slock.ai / Cursor / ClawTeam 的**核心差异化能力**。
 

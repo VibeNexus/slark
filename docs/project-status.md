@@ -12,25 +12,29 @@
 
 | 项 | 值 |
 |---|---|
-| 当前 Sprint | **Sprint 6 — Onboarding Loop + Skill Matrix**（Kickoff 中，未动工） |
-| 上一 Sprint | Sprint 5 — Evolution Loop（✅ 已交付，见 [`sprint5-milestone.md`](sprint5-milestone.md)） |
-| 上上 Sprint | Sprint 4 — Delivery Loop (Scribe)（见 [`sprint4-milestone.md`](sprint4-milestone.md)） |
+| 当前 Sprint | **Sprint 7 — Team-First-Collaborative Workflow Design**（Kickoff 中） |
+| 上一 Sprint | Sprint 6 — Onboarding Loop + Skill Matrix（✅ 已交付，见 [`sprint6-milestone.md`](sprint6-milestone.md)） |
+| 上上 Sprint | Sprint 5 — Evolution Loop（见 [`sprint5-milestone.md`](sprint5-milestone.md)） |
 | 当前分支 | `main` |
 | 类型检查 | ✅ pnpm typecheck 通过 |
 
-### Sprint 5 已交付摘要
+### Sprint 6 已交付摘要
 
-- ✅ **CP1** `agent_observations` / `agent_feedback` 表（schema_version → 7）
-- ✅ **CP2** Evaluator System Agent（24h cron 扫近期 agent 消息 → observations）
-- ✅ **CP3** Coach System Agent（聚合 negative tag ≥ 3 → 产 description 修改建议）
-- ✅ **CP4 + CP5** Agent Profile FEEDBACK Tab + Apply / Reject / Rollback（Q-6 quick rollback）
-- ✅ **CP6** Sprint 5 milestone 文档
+- ✅ **CP1** `project_onboarding` / `agent_skills` 表（schema_version → 8）
+- ✅ **CP2 + CP3** Onboarder System Agent + Project 创建异步触发 + Onboarding 卡片
+- ✅ **CP4 + CP5** Skill Matrix 从 tool_call 自动统计 + Create Task 智能推荐 assignee
+- ✅ **CP6** Sprint 6 milestone 文档
 
 ---
 
 ## 2. 当前阻塞 / 待决议
 
-无阻塞项；Sprint 6 可立即启动。
+Sprint 7 启动前需要拍板：
+
+| # | 议题 | 建议默认 | 状态 |
+|---|------|---------|------|
+| Q-8 | Facilitator Session 触发方式 | 手动触发（用户掌控感） | ⏳ 待拍板 |
+| Q-9 | Facilitator Session 最大时长 / token 消耗 | 30 分钟 / 总轮数 ≤ 12 | ⏳ 待拍板 |
 
 ### 已决议（历史，仅供检索）
 
@@ -51,6 +55,15 @@
 ---
 
 ## 3. 已完成 Sprint 摘要
+
+### Sprint 6 — Onboarding Loop + Skill Matrix
+
+详见 [`sprint6-milestone.md`](sprint6-milestone.md)。
+
+- `project_onboarding` / `agent_skills`（schema_version → 8）
+- Onboarder System Agent（README + package.json + git log → 总结）
+- Project 创建后异步触发 Onboarder + Onboarding 卡片
+- Skill Matrix 从 tool_call 自动统计 + Create Task `Suggested by Skill Matrix`
 
 ### Sprint 5 — Evolution Loop（Agent 成长）
 
@@ -118,23 +131,23 @@ Sprint 3 完成后剩余的延后项（详见 [`sprint3-milestone.md`](sprint3-m
 
 ## 5. 下一步建议
 
-Sprint 5 已完成。进入 Sprint 6 — Onboarding Loop + Skill Matrix。
+Sprint 6 已完成。进入 Sprint 7 — Team-First-Collaborative Workflow Design。
 
-### Sprint 6 主体（5~7 天）
+### Sprint 7 主体（6~8 天）
 
-1. **CP1** `project_onboarding` / `agent_skills` 表（schema_version → 8）
-2. **CP2** Onboarder System Agent（分析 README / package.json / git history）
-3. **CP3** 创建 Project 后自动 Onboarder + Onboarding 卡片 UI
-4. **CP4** `agent_skills` 从 tool_call 自动统计模块覆盖
-5. **CP5** Create Task 智能推荐 assignee + Skill Matrix UI
-6. **CP6** Sprint 6 milestone
+1. **CP1** `workflow_sessions` 表（schema_version → 9）+ Facilitator 入口
+2. **CP2** Facilitator System Agent（多轮对话主持产 YAML draft）
+3. **CP3** Workflow Design Session 状态机（轮次推进 / 收敛 / 终止）
+4. **CP4** Session 结束后 YAML draft Approve UI（写入 workflows 表）
+5. **CP5** Failure 降级提示 + Session 归档
+6. **CP6** Sprint 7 milestone + 全项目收尾
 
-详细范围与验收见 [`PLAN.md` Sprint 6](../PLAN.md#sprint-6-onboarding-loop--skill-matrix锦上添花)。
+详细范围与验收见 [`PLAN.md` Sprint 7](../PLAN.md#sprint-7-team-first-collaborative-workflow-designfacilitator)。
 
 ### 启动前 checklist
 
-- ✅ 无 Q-N 待决议
-- 扫 `docs/optimization-backlog.md`：O-1 Task in_progress 自动触发现仍待排
+- ⏳ **Q-8** 拍板（Facilitator Session 触发方式 — 建议手动）
+- ⏳ **Q-9** 拍板（Session 最大时长 / 总轮数）
 
 ---
 
