@@ -20,6 +20,9 @@ import type {
   ChatMessage,
   MessageMetadata,
   Project,
+  Responsibility,
+  ResponsibilityAuthority,
+  ResponsibilityRole,
   Task,
   Workflow,
   WorkflowRun,
@@ -1186,5 +1189,84 @@ export const workflowRunRepo = {
     values.push(id);
     db.prepare(`UPDATE workflow_runs SET ${fields.join(', ')} WHERE id = ?`).run(...values);
     return this.getById(db, id);
+  },
+};
+
+// =============================================================================
+// Responsibilities (Sprint 3 / D-17)
+// =============================================================================
+
+interface ResponsibilityRow {
+  id: number;
+  workflow_id: string;
+  step_id: string;
+  agent_id: string;
+  role: string;
+  authority: string | null;
+  created_at: number;
+}
+
+function rowToResponsibility(r: ResponsibilityRow): Responsibility {
+  return {
+    id: r.id,
+    workflow_id: r.workflow_id,
+    step_id: r.step_id,
+    agent_id: r.agent_id,
+    role: r.role as ResponsibilityRole,
+    authority: r.authority as ResponsibilityAuthority | null,
+    created_at: r.created_at,
+  };
+}
+
+export const responsibilityRepo = {
+  listByWorkflow(db: Database, workflowId: string): Responsibility[] {
+    const rows = db
+      .prepare(
+        'SELECT * FROM responsibilities WHERE workflow_id = ? ORDER BY id ASC',
+      )
+      .all(workflowId) as ResponsibilityRow[];
+    return rows.map(rowToResponsibility);
+  },
+
+  listByAgent(db: Database, agentId: string): Responsibility[] {
+    const rows = db
+      .prepare(
+        'SELECT * FROM responsibilities WHERE agent_id = ? ORDER BY workflow_id, step_id',
+      )
+      .all(agentId) as ResponsibilityRow[];
+    return rows.map(rowToResponsibility);
+  },
+
+  /**
+   * 替换 workflow 的全部 responsibilities（先清空再插入）。
+   * 用于 workflow 创建 / definition_yaml 更新时的 auto-derive。
+   */
+  replaceForWorkflow(
+    db: Database,
+    workflowId: string,
+    rows: Array<{
+      step_id: string;
+      agent_id: string;
+      role: ResponsibilityRole;
+      authority: ResponsibilityAuthority | null;
+    }>,
+  ): Responsibility[] {
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM responsibilities WHERE workflow_id = ?').run(workflowId);
+      const ts = now();
+      const stmt = db.prepare(
+        `INSERT INTO responsibilities (workflow_id, step_id, agent_id, role, authority, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      );
+      for (const r of rows) {
+        stmt.run(workflowId, r.step_id, r.agent_id, r.role, r.authority, ts);
+      }
+    });
+    tx();
+    return this.listByWorkflow(db, workflowId);
+  },
+
+  remove(db: Database, id: number): void {
+    db.prepare('DELETE FROM responsibilities WHERE id = ?').run(id);
   },
 };

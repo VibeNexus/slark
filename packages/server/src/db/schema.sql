@@ -197,3 +197,25 @@ CREATE INDEX IF NOT EXISTS idx_workflow_runs_thread ON workflow_runs(thread_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_active
   ON workflow_runs(channel_id, status)
   WHERE status IN ('running','awaiting_approval');
+
+-- =============================================================================
+-- 13. responsibilities (Sprint 3 引入，对齐 docs/technical-decisions.md D-17)
+--
+-- Workflow × Step × Agent 的责任连接（简化 RACI）。
+-- agent_id 是 TEXT 而非 FK：可为 agents.id（普通 agent）或 'local-user'（系统一等"agent"）
+-- 或 'unresolved:<mention>'（YAML 引用了项目里不存在的 agent name）。
+--
+-- workflow definition_yaml 修改时，会先 DELETE 然后重新 derive。
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS responsibilities (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  workflow_id     TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  step_id         TEXT NOT NULL,
+  agent_id        TEXT NOT NULL,
+  role            TEXT NOT NULL CHECK(role IN ('executor','approver','reviewer','informed')),
+  authority       TEXT CHECK(authority IN ('must_approve','optional_approve','no_authority')),
+  created_at      INTEGER NOT NULL,
+  UNIQUE(workflow_id, step_id, agent_id, role)
+);
+CREATE INDEX IF NOT EXISTS idx_responsibilities_workflow ON responsibilities(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_responsibilities_agent ON responsibilities(agent_id);

@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import type { Database } from 'better-sqlite3';
 import type { ReasoningEffort, Runtime } from '@slark/shared';
-import { agentRepo, agentRunRepo, activityRepo } from '../db/repos.js';
+import { agentRepo, agentRunRepo, activityRepo, workflowRepo } from '../db/repos.js';
+import { deriveResponsibilitiesForWorkflow } from '../workflows/derive-responsibilities.js';
 
 export async function agentRoutes(app: FastifyInstance, db: Database): Promise<void> {
   // 列出 agent；可选 ?project_id= 过滤
@@ -38,6 +39,23 @@ export async function agentRoutes(app: FastifyInstance, db: Database): Promise<v
 
     // CP8.5：D-8 v1.0 修订后 agent 不再有独立 workspace 目录。
     // Agent cwd 取自 channel 所属 Project 的 workspace_path。
+
+    // Sprint 3 CP1：新 agent 加入 project 后，重新 derive 该 project 内 workflow 的 responsibilities。
+    // 让原 'unresolved:<name>' 占位升级为真实 agent_id（典型场景：Create Project 向导先建 workflow
+    // 再批量建 agent，此时 derive 需要在 agent 创建后重跑）。
+    if (agent.project_id) {
+      const wfs = workflowRepo.listByProject(db, agent.project_id);
+      for (const wf of wfs) {
+        try {
+          deriveResponsibilitiesForWorkflow(db, wf.id);
+        } catch (e) {
+          req.log.warn(
+            { err: e, workflow: wf.name, agent: agent.name },
+            '[workflows] failed to re-derive after agent create',
+          );
+        }
+      }
+    }
 
     reply.code(201);
     return agent;

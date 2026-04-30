@@ -26,11 +26,13 @@ import type { Database } from 'better-sqlite3';
 import {
   channelRepo,
   projectRepo,
+  responsibilityRepo,
   workflowRepo,
   workflowRunRepo,
 } from '../db/repos.js';
 import { parseWorkflowYaml, WorkflowYamlError } from '../workflows/yaml-parser.js';
 import { abortWorkflowRun } from '../workflows/runner.js';
+import { deriveResponsibilitiesForWorkflow } from '../workflows/derive-responsibilities.js';
 
 const COMMAND_RE = /^\/[a-z][a-z0-9-]*$/;
 
@@ -119,6 +121,23 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
       definition_yaml: body.definition_yaml,
       source: 'user',
     });
+
+    // CP1：自动 derive responsibilities
+    try {
+      const res = deriveResponsibilitiesForWorkflow(db, wf.id);
+      if (res.unresolved.length > 0) {
+        req.log.warn(
+          { workflow: wf.name, unresolved: res.unresolved },
+          '[workflows] derived responsibilities have unresolved agents',
+        );
+      }
+    } catch (e) {
+      req.log.warn(
+        { err: e, workflow: wf.name },
+        '[workflows] failed to derive responsibilities',
+      );
+    }
+
     reply.code(201);
     return wf;
   });
@@ -187,6 +206,19 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
     }
 
     const updated = workflowRepo.update(db, id, body);
+
+    // CP1：YAML 变化时重新 derive responsibilities
+    if (updated && body.definition_yaml !== undefined) {
+      try {
+        deriveResponsibilitiesForWorkflow(db, updated.id);
+      } catch (e) {
+        req.log.warn(
+          { err: e, workflow: updated.name },
+          '[workflows] failed to re-derive responsibilities on update',
+        );
+      }
+    }
+
     return updated;
   });
 
@@ -211,6 +243,17 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
       return { error: 'workflow not found' };
     }
     return workflowRunRepo.listByWorkflow(db, id);
+  });
+
+  // 该 workflow 的责任连接（CP1）
+  app.get('/api/workflows/:id/responsibilities', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const wf = workflowRepo.getById(db, id);
+    if (!wf) {
+      reply.code(404);
+      return { error: 'workflow not found' };
+    }
+    return responsibilityRepo.listByWorkflow(db, id);
   });
 
   // 单次 run 详情

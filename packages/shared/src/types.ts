@@ -320,6 +320,34 @@ export interface WorkflowRunState {
 }
 
 // =============================================================================
+// Responsibility (Sprint 3 / D-17)
+// =============================================================================
+
+export type ResponsibilityRole = 'executor' | 'approver' | 'reviewer' | 'informed';
+export type ResponsibilityAuthority =
+  | 'must_approve'
+  | 'optional_approve'
+  | 'no_authority';
+
+/**
+ * Workflow × Step × Agent 的责任连接（简化 RACI）。
+ *
+ * `agent_id` 字段语义：
+ *   - 普通 agent：agents.id 字符串
+ *   - 系统一等用户：固定字符串 `'local-user'`
+ *   - YAML 引用了项目内不存在的 agent name：`'unresolved:<mention>'`
+ */
+export interface Responsibility {
+  id: number;
+  workflow_id: string;
+  step_id: string;
+  agent_id: string;
+  role: ResponsibilityRole;
+  authority: ResponsibilityAuthority | null;
+  created_at: number;
+}
+
+// =============================================================================
 // Team Architect System Agent（v1.0 / D-15 / D-19）
 // =============================================================================
 

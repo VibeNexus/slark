@@ -14,8 +14,9 @@ import websocket from '@fastify/websocket';
 import { config } from './config.js';
 import { getDb, closeDb } from './db/index.js';
 import { runSeed } from './db/seed.js';
-import { channelRepo, agentRepo, projectRepo } from './db/repos.js';
+import { channelRepo, agentRepo, projectRepo, workflowRepo } from './db/repos.js';
 import { importBuiltinsForProject } from './workflows/builtin-import.js';
+import { deriveResponsibilitiesForWorkflow } from './workflows/derive-responsibilities.js';
 import { channelRoutes } from './routes/channels.js';
 import { agentRoutes } from './routes/agents.js';
 import { taskRoutes } from './routes/tasks.js';
@@ -60,6 +61,24 @@ async function main() {
       app.log.warn(
         { project: p.name, errors: res.errors },
         '[workflows] some builtin templates failed to seed',
+      );
+    }
+  }
+
+  // Sprint 3 CP1：给已存在的 workflows 补齐 responsibilities（首次升级到 schema v5 时需要）
+  for (const wf of workflowRepo.list(db)) {
+    try {
+      const res = deriveResponsibilitiesForWorkflow(db, wf.id);
+      if (res.unresolved.length > 0) {
+        app.log.warn(
+          { workflow: wf.name, unresolved: res.unresolved },
+          '[workflows] derived responsibilities have unresolved agents (will resolve once those agents exist)',
+        );
+      }
+    } catch (e) {
+      app.log.warn(
+        { err: e, workflow: wf.name },
+        '[workflows] failed to derive responsibilities',
       );
     }
   }
