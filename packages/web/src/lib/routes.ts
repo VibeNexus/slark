@@ -33,6 +33,10 @@ export function projectAgentProfilePath(projectName: string, agentId: string): s
   return `/p/${projectName}/agent/${agentId}`;
 }
 
+export function projectWorkflowsPath(projectName: string): string {
+  return `/p/${projectName}/workflows`;
+}
+
 /**
  * 根据 channel id 解析完整路径。
  * 优先用 channel.project_id 对应的 project name；若 channel 无 project_id（v0 兼容数据），

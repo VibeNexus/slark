@@ -264,3 +264,39 @@ export const listActiveWorkflowRuns = (status?: 'running' | 'awaiting_approval')
     `/api/workflow-runs${qs}`,
   );
 };
+
+// Workflow Import / Export (Sprint 3 CP4)
+export async function exportWorkflowYaml(id: string): Promise<{
+  filename: string;
+  yaml: string;
+}> {
+  const res = await fetch(`/api/workflows/${id}/export`);
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`${res.status} ${res.statusText}: ${body}`);
+  }
+  const yaml = await res.text();
+  // 解析文件名：Content-Disposition: attachment; filename="..."
+  const cd = res.headers.get('content-disposition') ?? '';
+  const m = /filename="([^"]+)"/.exec(cd);
+  const filename = m?.[1] ?? `${id}.workflow.yaml`;
+  return { filename, yaml };
+}
+
+export const importWorkflowYaml = (
+  projectId: string,
+  data: {
+    definition_yaml: string;
+    name?: string;
+    description?: string | null;
+    trigger_command?: string;
+    overwrite?: boolean;
+  },
+) =>
+  request<{
+    imported: Workflow;
+    mode: 'created' | 'updated';
+  }>(`/api/projects/${projectId}/workflows/import`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });

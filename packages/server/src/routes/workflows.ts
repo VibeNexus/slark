@@ -234,6 +234,123 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
     reply.code(204);
   });
 
+  // YAML 导出（CP4）
+  app.get('/api/workflows/:id/export', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const wf = workflowRepo.getById(db, id);
+    if (!wf) {
+      reply.code(404);
+      return { error: 'workflow not found' };
+    }
+    const filename = `${wf.name.replace(/[^a-z0-9_-]+/gi, '-')}.workflow.yaml`;
+    reply
+      .header('Content-Type', 'application/x-yaml; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="${filename}"`);
+    return wf.definition_yaml;
+  });
+
+  // YAML 导入（CP4）
+  // body: { definition_yaml: string, name?: string, trigger_command?: string,
+  //         description?: string|null, overwrite?: boolean }
+  // - YAML 必须自带合法 trigger.command；body 的 trigger_command 可选 override
+  // - body.name 可选 override（默认用 YAML 顶层 name）
+  // - 同 project + trigger_command 已存在时：默认 409；overwrite=true 则 PATCH 覆盖
+  app.post('/api/projects/:id/workflows/import', async (req, reply) => {
+    const { id: projectId } = req.params as { id: string };
+    const project = projectRepo.getById(db, projectId);
+    if (!project) {
+      reply.code(404);
+      return { error: 'project not found' };
+    }
+
+    const body = req.body as {
+      definition_yaml?: string;
+      name?: string;
+      description?: string | null;
+      trigger_command?: string;
+      overwrite?: boolean;
+    };
+
+    if (!body?.definition_yaml || typeof body.definition_yaml !== 'string') {
+      reply.code(400);
+      return { error: 'definition_yaml is required' };
+    }
+
+    let definition;
+    try {
+      definition = parseWorkflowYaml(body.definition_yaml);
+    } catch (e) {
+      if (e instanceof WorkflowYamlError) {
+        reply.code(400);
+        return { error: `invalid YAML: ${e.message}` };
+      }
+      throw e;
+    }
+
+    const triggerCommand = body.trigger_command ?? definition.trigger.command;
+    if (!COMMAND_RE.test(triggerCommand)) {
+      reply.code(400);
+      return {
+        error:
+          'trigger_command must match /^\\/[a-z][a-z0-9-]*$/ (e.g. "/new-feature")',
+      };
+    }
+    if (
+      body.trigger_command &&
+      definition.trigger.command !== body.trigger_command
+    ) {
+      reply.code(400);
+      return {
+        error: `trigger_command mismatch: body says "${body.trigger_command}" but YAML says "${definition.trigger.command}"`,
+      };
+    }
+
+    const name = body.name ?? definition.name;
+    const description = body.description ?? definition.description ?? null;
+
+    const existing = workflowRepo.getByTrigger(db, projectId, triggerCommand);
+
+    if (existing && !body.overwrite) {
+      reply.code(409);
+      return {
+        error: `trigger_command "${triggerCommand}" already exists in this project (workflow "${existing.name}"). Pass overwrite=true to replace.`,
+        existing,
+      };
+    }
+
+    let wf;
+    if (existing && body.overwrite) {
+      wf = workflowRepo.update(db, existing.id, {
+        name,
+        description,
+        trigger_command: triggerCommand,
+        definition_yaml: body.definition_yaml,
+      });
+      try {
+        deriveResponsibilitiesForWorkflow(db, existing.id);
+      } catch {
+        /* ignore */
+      }
+    } else {
+      wf = workflowRepo.create(db, {
+        project_id: projectId,
+        name,
+        description,
+        trigger_command: triggerCommand,
+        definition_yaml: body.definition_yaml,
+        source: 'user',
+      });
+      try {
+        deriveResponsibilitiesForWorkflow(db, wf.id);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    reply.code(existing ? 200 : 201);
+    return { imported: wf, mode: existing ? 'updated' : 'created' };
+  });
+
   // 该 workflow 的执行历史
   app.get('/api/workflows/:id/runs', async (req, reply) => {
     const { id } = req.params as { id: string };

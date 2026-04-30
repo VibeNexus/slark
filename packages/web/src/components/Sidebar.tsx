@@ -17,6 +17,7 @@ import {
   projectChannelPath,
   projectDmPath,
   projectIndexPath,
+  projectWorkflowsPath,
 } from '../lib/routes';
 import { Avatar } from './Avatar';
 import { AgentStatusDot } from './StatusDot';
@@ -245,6 +246,13 @@ function ChatTabContent({
         <ToolLink icon={<ThreadIcon />} label="Threads" to="/threads" />
         <ToolLink icon={<TaskIcon />} label="Tasks" to="/tasks" />
         <ToolLink icon={<BookmarkIcon />} label="Saved" to="/saved" />
+        {projectName && (
+          <ToolLink
+            icon={<WorkflowIcon />}
+            label="Workflows"
+            to={projectWorkflowsPath(projectName)}
+          />
+        )}
       </div>
 
       {/* CHANNELS */}
@@ -498,6 +506,16 @@ function InboxIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M22 12h-6l-2 3h-4l-2-3H2" />
       <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+    </svg>
+  );
+}
+function WorkflowIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M9 6h6M6 9v6" />
     </svg>
   );
 }
