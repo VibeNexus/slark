@@ -37,6 +37,8 @@ import type {
   Workflow,
   WorkflowRun,
   WorkflowRunStatus,
+  WorkflowSession,
+  WorkflowSessionStatus,
   WorkflowSource,
 } from '@slark/shared';
 import type {
@@ -2047,5 +2049,119 @@ export const skillRepo = {
          touch_count = touch_count + 1,
          last_touched = excluded.last_touched`,
     ).run(agentId, projectId, skillKey, ts);
+  },
+};
+
+// =============================================================================
+// Workflow Sessions (Sprint 7 / D-15 Facilitator)
+// =============================================================================
+
+interface SessionRow {
+  id: number;
+  project_id: string;
+  goal_input: string;
+  draft_yaml: string | null;
+  rationale: string | null;
+  status: string;
+  workflow_id: string | null;
+  fallback_reason: string | null;
+  started_by: string;
+  created_at: number;
+  ended_at: number | null;
+}
+
+function rowToSession(r: SessionRow): WorkflowSession {
+  return {
+    id: r.id,
+    project_id: r.project_id,
+    goal_input: r.goal_input,
+    draft_yaml: r.draft_yaml,
+    rationale: r.rationale,
+    status: r.status as WorkflowSessionStatus,
+    workflow_id: r.workflow_id,
+    fallback_reason: r.fallback_reason,
+    started_by: r.started_by,
+    created_at: r.created_at,
+    ended_at: r.ended_at,
+  };
+}
+
+export const workflowSessionRepo = {
+  listByProject(db: Database, projectId: string, limit = 50): WorkflowSession[] {
+    const rows = db
+      .prepare(
+        `SELECT * FROM workflow_sessions WHERE project_id = ?
+         ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(projectId, limit) as SessionRow[];
+    return rows.map(rowToSession);
+  },
+
+  getById(db: Database, id: number): WorkflowSession | null {
+    const row = db
+      .prepare('SELECT * FROM workflow_sessions WHERE id = ?')
+      .get(id) as SessionRow | undefined;
+    return row ? rowToSession(row) : null;
+  },
+
+  create(
+    db: Database,
+    input: { project_id: string; goal_input: string; started_by: string },
+  ): WorkflowSession {
+    const ts = now();
+    const result = db
+      .prepare(
+        `INSERT INTO workflow_sessions
+         (project_id, goal_input, status, started_by, created_at)
+         VALUES (?, ?, 'drafting', ?, ?)`,
+      )
+      .run(input.project_id, input.goal_input, input.started_by, ts);
+    const s = this.getById(db, Number(result.lastInsertRowid));
+    if (!s) throw new Error('session insert failed');
+    return s;
+  },
+
+  update(
+    db: Database,
+    id: number,
+    patch: Partial<{
+      status: WorkflowSessionStatus;
+      draft_yaml: string | null;
+      rationale: string | null;
+      workflow_id: string | null;
+      fallback_reason: string | null;
+      ended: boolean;
+    }>,
+  ): WorkflowSession | null {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    if (patch.status !== undefined) {
+      fields.push('status = ?');
+      values.push(patch.status);
+    }
+    if (patch.draft_yaml !== undefined) {
+      fields.push('draft_yaml = ?');
+      values.push(patch.draft_yaml);
+    }
+    if (patch.rationale !== undefined) {
+      fields.push('rationale = ?');
+      values.push(patch.rationale);
+    }
+    if (patch.workflow_id !== undefined) {
+      fields.push('workflow_id = ?');
+      values.push(patch.workflow_id);
+    }
+    if (patch.fallback_reason !== undefined) {
+      fields.push('fallback_reason = ?');
+      values.push(patch.fallback_reason);
+    }
+    if (patch.ended) {
+      fields.push('ended_at = ?');
+      values.push(now());
+    }
+    if (!fields.length) return this.getById(db, id);
+    values.push(id);
+    db.prepare(`UPDATE workflow_sessions SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    return this.getById(db, id);
   },
 };

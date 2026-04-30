@@ -320,6 +320,32 @@ export interface WorkflowRunState {
 }
 
 // =============================================================================
+// Workflow Design Session (Sprint 7 / D-15 Facilitator)
+// =============================================================================
+
+export type WorkflowSessionStatus =
+  | 'drafting'
+  | 'awaiting_approval'
+  | 'approved'
+  | 'rejected'
+  | 'failed'
+  | 'archived';
+
+export interface WorkflowSession {
+  id: number;
+  project_id: string;
+  goal_input: string;
+  draft_yaml: string | null;
+  rationale: string | null;
+  status: WorkflowSessionStatus;
+  workflow_id: string | null;
+  fallback_reason: string | null;
+  started_by: string;
+  created_at: number;
+  ended_at: number | null;
+}
+
+// =============================================================================
 // Onboarding Loop — project_onboarding + agent_skills (Sprint 6 / D-20)
 // =============================================================================
 

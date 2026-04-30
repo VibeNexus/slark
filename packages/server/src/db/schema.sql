@@ -373,3 +373,38 @@ CREATE INDEX IF NOT EXISTS idx_skills_agent
   ON agent_skills(agent_id, touch_count DESC);
 CREATE INDEX IF NOT EXISTS idx_skills_project_key
   ON agent_skills(project_id, skill_key);
+
+-- =============================================================================
+-- 20. workflow_sessions (Sprint 7 引入，对齐 D-15 Facilitator)
+--
+-- "Team-First-Collaborative Workflow Design" Session 的状态记录。
+-- 用户启动一次 Session → Facilitator 主持团队讨论 → 产出 YAML draft → 用户 Approve。
+--
+-- 状态机：
+--   drafting     — Facilitator 正在跑（fire-and-forget）
+--   awaiting_approval — 已生成 YAML draft，等用户 Approve / Reject
+--   approved     — 用户批准；YAML 已写入 workflows 表（workflow_id 不为 null）
+--   rejected     — 用户拒绝
+--   failed       — Facilitator 失败（fallback_reason 记原因，提示走 Sprint 2 Template）
+--   archived     — 归档（用户从 UI 删除会议）
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS workflow_sessions (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  /** 用户提供的目标描述（这次想设计什么 workflow） */
+  goal_input      TEXT NOT NULL,
+  /** Facilitator 产出的 YAML draft（草稿；approved 后写到 workflows 表） */
+  draft_yaml      TEXT,
+  /** Facilitator 对设计的解释 */
+  rationale       TEXT,
+  status          TEXT NOT NULL DEFAULT 'drafting'
+                  CHECK(status IN ('drafting','awaiting_approval','approved','rejected','failed','archived')),
+  /** Approve 后写入的 workflow id */
+  workflow_id     TEXT REFERENCES workflows(id) ON DELETE SET NULL,
+  fallback_reason TEXT,
+  started_by      TEXT NOT NULL,
+  created_at      INTEGER NOT NULL,
+  ended_at        INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_project ON workflow_sessions(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_status ON workflow_sessions(project_id, status);
