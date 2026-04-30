@@ -98,9 +98,8 @@ Layer 1:  Goal            项目目标（一等公民，必填）
 | **Sprint 1** — Foundation + Goal → AI Team | Programmable AI Team OS 雏形 | ✅ **已交付**（见 [`docs/sprint1-milestone.md`](docs/sprint1-milestone.md)） |
 | **Sprint 2** — Workflow Framework | Workflow YAML + 3 内置模板 + 执行引擎 | ✅ **已交付**（见 [`docs/sprint2-milestone.md`](docs/sprint2-milestone.md)） |
 | **Sprint 3** — Responsibility + User Intervention | 批准流 + 用户介入 + Workflow Import/Export | ✅ **已交付**（见 [`docs/sprint3-milestone.md`](docs/sprint3-milestone.md)） |
-| **Sprint 4** — Delivery Loop (Scribe) | 沉淀 + Intelligence Tab | ⏳ **当前焦点** |
-| **Sprint 4** — Delivery Loop (Scribe) | 沉淀 + Intelligence Tab | ⏳ **当前焦点** |
-| Sprint 5 — Evolution Loop | Evaluator + Coach + Description 演化 | 规划 |
+| **Sprint 4** — Delivery Loop (Scribe) | 沉淀 + Intelligence Tab | ✅ **已交付**（见 [`docs/sprint4-milestone.md`](docs/sprint4-milestone.md)） |
+| **Sprint 5** — Evolution Loop | Evaluator + Coach + Description 演化 | ⏳ **当前焦点** |
 | Sprint 6 — Onboarding Loop + Skill Matrix | 新 Project 自动分析 + 能力地图 | 规划 |
 | Sprint 7 — Team-First-Collaborative Workflow Design | Facilitator 主持的 Workflow Design Session | 规划 |
 | Sprint 8+ — 远期路线 | 跨 Project 经验迁移 / 多 runtime / Worktree 隔离 / Marketplace | 远期 |
@@ -175,44 +174,15 @@ CP1 ~ CP6 全部交付：
 
 ---
 
-## Sprint 4: Delivery Loop（Scribe 沉淀）（当前焦点）
+### Sprint 4：Delivery Loop（Scribe 沉淀）✅
 
-> Review 3 拆分：本 Sprint 只做 Scribe；Facilitator 独立成 Sprint 7。
+CP1 ~ CP6 已交付：`decisions` / `lessons` 表（schema_version → 6）+ Scribe System Agent + Workflow 完成自动触发 + `/sediment` + Intelligence Tab + ContextBuilder 注入。
 
-**目标**：每个 Workflow Run 结束后自动沉淀 decisions / lessons 到项目知识池。
-
-**战略价值**：项目知识资产**自动积累**，Slark 成为项目知识的管理后台。
-
-**预估工期**：5~7 工作日
-
-### 范围
-
-- [ ] **Scribe System Agent**
-  - 触发：Workflow Run 完成 / Thread 解决 / 用户手动 `/sediment`
-  - 实现：spawn 一个特殊 prompt，输入完整 thread + tool_calls
-  - 输出：JSON 数组 `[{ kind, title, body, audience, source_message_id, confidence }]`
-- [ ] `decisions` / `lessons` 表
-- [ ] Project 新增 **Intelligence Tab**（与 CHAT/TASKS Tab 平级）
-  - Pending Review 队列
-  - Knowledge Base 浏览（按 kind / audience / tags 过滤）
-  - Decisions 时间线
-- [ ] ContextBuilder 升级：按 audience + 关键词过滤注入 lessons / decisions（token 预算内）
-
-### 启动前待决
-
-- Q-5：System Agent token 配额
-- Q-7：lessons 是否跨 Project 共享
-
-### 验收
-
-- [ ] 跑完一个 `/new-feature` 后，Intelligence Tab 出现 Pending Review 条目
-- [ ] 条目内容合理（不是空话或重复 description）
-- [ ] Approve 后 lessons 表有数据
-- [ ] 下次 spawn 同 audience 的 Agent 时，prompt 里能看到注入的 lesson
+详细 → [`docs/sprint4-milestone.md`](docs/sprint4-milestone.md)。
 
 ---
 
-## Sprint 5: Evolution Loop（Agent 成长）
+## Sprint 5: Evolution Loop（Agent 成长）（当前焦点）
 
 **目标**：Agent description 会随时间演化，团队越用越强。
 
