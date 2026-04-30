@@ -24,6 +24,7 @@ import type { Database } from 'better-sqlite3';
 import { CursorAdapter } from '../agents/cursor-adapter.js';
 import { runCLI } from '../agents/runner.js';
 import { agentRepo, messageRepo, observationRepo } from '../db/repos.js';
+import { runCoachOnce } from './coach.js';
 
 interface EvaluatorLogger {
   info: (msg: string) => void;
@@ -44,16 +45,18 @@ export function startEvaluatorScheduler(
   logger: EvaluatorLogger = consoleLog,
 ): void {
   if (evaluatorTimer) return;
+  const tick = async () => {
+    try {
+      await runEvaluatorOnce(db, logger);
+      await runCoachOnce(db, logger);
+    } catch (e) {
+      logger.error(`[evaluator] tick failed: ${(e as Error).message}`);
+    }
+  };
   // 首次延迟 60s 等服务稳定，再启动循环
   setTimeout(() => {
-    void runEvaluatorOnce(db, logger).catch((e) =>
-      logger.error(`[evaluator] tick failed: ${(e as Error).message}`),
-    );
-    evaluatorTimer = setInterval(() => {
-      void runEvaluatorOnce(db, logger).catch((e) =>
-        logger.error(`[evaluator] tick failed: ${(e as Error).message}`),
-      );
-    }, EVALUATOR_WINDOW_MS);
+    void tick();
+    evaluatorTimer = setInterval(() => void tick(), EVALUATOR_WINDOW_MS);
     if (typeof evaluatorTimer.unref === 'function') evaluatorTimer.unref();
   }, 60_000);
 }
