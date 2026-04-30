@@ -62,6 +62,9 @@ export function ChannelPage() {
     [allAgents],
   );
 
+  // hook：必须在所有 early return 之前调用
+  const channelCommands = useChannelCommands(channelId ?? null, false);
+
   if (!channelId || !projectName) return null;
 
   // 等 channels 加载完再判断 not-found，避免刷新时闪一下错误页
@@ -118,8 +121,6 @@ export function ChannelPage() {
     next.set('thread', messageId);
     setParams(next);
   };
-
-  const channelCommands = useChannelCommands(channelId, false);
 
   return (
     <div className="flex-1 flex min-w-0 min-h-0">

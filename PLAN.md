@@ -96,8 +96,8 @@ Layer 1:  Goal            项目目标（一等公民，必填）
 | Phase 0.5 — UI 基准采集 | 17 张截图 + 4 份规范 | ✅ 已完成 |
 | v0 MVP — 基础聊天室能力 | M1~M5 骨架 + 链式触发 + Tasks 面板 | ✅ 已交付（Sprint 1 起点）|
 | **Sprint 1** — Foundation + Goal → AI Team | Programmable AI Team OS 雏形 | ✅ **已交付**（见 [`docs/sprint1-milestone.md`](docs/sprint1-milestone.md)） |
-| **Sprint 2** — Workflow Framework | Workflow YAML + 3 内置模板 + 执行引擎 | ⏳ **当前焦点**（待 Q-4 拍板）|
-| Sprint 3 — Responsibility + User Intervention | 批准流 + 用户介入 + Workflow Import/Export | 规划 |
+| **Sprint 2** — Workflow Framework | Workflow YAML + 3 内置模板 + 执行引擎 | ✅ **已交付**（见 [`docs/sprint2-milestone.md`](docs/sprint2-milestone.md)） |
+| **Sprint 3** — Responsibility + User Intervention | 批准流 + 用户介入 + Workflow Import/Export | ⏳ **当前焦点** |
 | Sprint 4 — Delivery Loop (Scribe) | 沉淀 + Intelligence Tab | 规划 |
 | Sprint 5 — Evolution Loop | Evaluator + Coach + Description 演化 | 规划 |
 | Sprint 6 — Onboarding Loop + Skill Matrix | 新 Project 自动分析 + 能力地图 | 规划 |
@@ -138,102 +138,26 @@ Layer 1:  Goal            项目目标（一等公民，必填）
 
 CP1 ~ CP7 全部交付：`projects` / `agent_runs` schema、Projects API、Team Architect 系统 Agent + 兜底三件套、Create Project 三步向导、Sidebar Project 切换器、Agent Profile 简化为 2 Tab、Engine 按 `project.workspace_path` 路由 cwd。
 
-详细交付清单 + 手动验收 runbook + 已知延后项 → [`docs/sprint1-milestone.md`](docs/sprint1-milestone.md)。
+详细交付清单 + 手动验收 runbook → [`docs/sprint1-milestone.md`](docs/sprint1-milestone.md)。
 
-延后到 Sprint 2+ 的清理项见 [`docs/project-status.md`](docs/project-status.md) §4 "已知技术债"。
+### Sprint 2：Workflow Framework ✅
 
----
+**目标已达成**：声明式 Workflow（YAML）可执行成一个完整 thread —— 触发 → 分步 → 路由 → 完结。
 
-## Sprint 2: Workflow Framework（当前焦点）
+CP8 + CP1 ~ CP5 全部交付：
 
-> **甬道落地 — Template 路径**。Slark 从"聊天室"跃升为"工作流引擎"。
+- CP8 Sprint 1 收口（Project scope 路由 / per-channel agent status / 删 `agents.status` / Activity filter / D-8 沙盒清理）
+- CP1 `workflows` / `workflow_runs` 两张新表（schema_version → 4）+ REST 端点
+- CP2 3 个内置模板（feature-development / bug-fix / research）+ auto-import
+- CP3 WorkflowRunner 状态机 + step 推进 + `/command` `/approve` `/reject` `/abort` 指令解析
+- CP4 Thread 顶部 WorkflowProgress 进度条 + `/command` 提示下拉
+- CP5 多 Project 隔离 + Sprint 2 milestone
 
-**目标**：内置 3 个 Workflow 模板，用户 `/new-feature` 等指令可驱动整个 thread 按 step 自动推进。
-
-**预估工期**：6~8 工作日
-
-**启动前阻塞**：Q-4（Workflow YAML 版本控制方式）—— 见 `docs/project-status.md` §2
-
-### 2.1 Schema 新增
-
-```sql
-CREATE TABLE workflows (
-  id              TEXT PRIMARY KEY,
-  project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  name            TEXT NOT NULL,
-  description     TEXT,
-  trigger_command TEXT UNIQUE,             -- 如 "/new-feature"
-  definition_yaml TEXT NOT NULL,
-  created_at      INTEGER NOT NULL,
-  updated_at      INTEGER NOT NULL
-);
-
-CREATE TABLE workflow_runs (
-  id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  workflow_id     TEXT NOT NULL REFERENCES workflows(id),
-  channel_id      TEXT NOT NULL REFERENCES channels(id),
-  thread_id       TEXT,
-  status          TEXT NOT NULL CHECK(status IN ('running','completed','aborted','failed')),
-  current_step    TEXT,
-  started_by      TEXT,
-  started_at      INTEGER NOT NULL,
-  ended_at        INTEGER,
-  state_json      TEXT
-);
-```
-
-### 2.2 后端任务
-
-- [ ] `WorkflowRepo` / `WorkflowRunRepo`（CRUD + state_json 读写）
-- [ ] YAML 解析器：校验 `name` / `trigger.command` / `steps[].id` / `on_complete` / `on_approve` / `on_reject` 引用合法性
-- [ ] Workflow Runner（执行引擎）
-  - 状态机：`running / completed / aborted / failed`
-  - 单步执行 → 等结果 → 推进下一步
-  - 超时 / kill / abort 处理
-  - 与现有 `agentEngine.runAgent()` 集成（每个 step 对应一次 spawn）
-- [ ] 内置 3 个模板：`feature-development` / `bug-fix` / `research`
-  - 模板首次进入 Project 时自动 import（或按需 import）
-- [ ] Channel 输入框 `/command` 检测 → Message Router 路由到 Workflow Runner
-- [ ] Responsibilities 简化版：从 YAML 自动推导 `executor`，写入 `responsibilities` 表（schema 见 Sprint 3）
-
-### 2.3 前端任务
-
-- [ ] Thread 内 Workflow 进度可视化
-  - 顶部进度条："Step 2/5: implement → @Dev-Backend"
-  - 已完成步骤打勾 + Agent 头像
-  - 当前步骤高亮
-- [ ] `await_approval` step 的最小暂停/继续 UI（完整批准流见 Sprint 3）
-- [ ] Channel 输入框 `/` 触发 command 提示（基础版）
-
-### 2.4 Sprint 1 收口（CP8 — 已完成 ✅）
-
-CP8.1 ~ CP8.5 已交付：
-
-- [x] CP8.1 路由切到 `/p/:projectName/channel/:channelId`
-- [x] CP8.2 WS `agent_status` 加 `channel_id` + `GET /api/agents/:id/status` 派生端点
-- [x] CP8.2 前端 StatusDot 从 `agent_runs` per-channel 派生
-- [x] CP8.3 删除 `agents.status` 字段 + Engine 双写移除（schema 升至 v3）
-- [x] CP8.4 Activity Tab 暴露 channel filter UI
-- [x] CP8.5 D-8 沙盒 fallback 死代码清理（`~/.slark/agents/{id}/` 不再创建；resolveCwd 必须有 project.workspace_path）
-
-### 2.5 验收
-
-- [ ] 在 Slark 频道输入 `/new-feature add OAuth`
-- [ ] 自动创建 thread，进度条显示 "Step 1/5: design → @Architect"
-- [ ] Architect 完成方案后，自动等用户 Approve（thread 内出现 Approval Card 占位）
-- [ ] 用户点 Approve → 自动 @Dev-Backend，进入 Step 3
-- [ ] Dev-Backend 完成后自动 @Reviewer
-- [ ] Reviewer reject → 回到 implement step（进度条回退）
-- [ ] Reviewer approve → done step → thread 自动归档
-- [ ] 多 Project 隔离：在两个 Project 各跑一条 workflow，`workflow_runs` 表两条独立记录互不干扰
-
-### 2.6 待决议
-
-- **Q-4**（启动前必须拍板）：Workflow YAML 的版本控制方式 → 建议默认 SQL 存 `definition_yaml` + 提供 Export
+详细交付清单 + 手动验收 runbook + 已知技术债 → [`docs/sprint2-milestone.md`](docs/sprint2-milestone.md)。
 
 ---
 
-## Sprint 3: Responsibility + User Intervention
+## Sprint 3: Responsibility + User Intervention（当前焦点）
 
 **目标**：Workflow 中用户可以随时介入、批准、拒绝、override；Workflow 可以导入导出。
 
@@ -243,20 +167,29 @@ CP8.1 ~ CP8.5 已交付：
 
 ### 范围
 
-- [ ] `responsibilities` 表（按 `product-brief.md` D-5）
-- [ ] Approval Flow：`await_approval` step 的 UI 卡片 + 自动 Notification
-- [ ] Slark 内联指令协议（参考 [`docs/clawteam-comparison.md`](docs/clawteam-comparison.md) B-2）：
-  - `/approve` / `/reject` / `/abort` / `/override` / `/comment`
-  - 后端 message-router 解析指令 → 路由到 workflow_runs 状态机
-- [ ] Inbox 视图（待批准动作汇总）—— 可选 P1
-- [ ] Workflow YAML Import / Export（文件下载 + 上传）
+- [ ] `responsibilities` 表（按 `product-brief.md` D-5）+ 从 YAML 自动推导 `executor`
+- [ ] **Approval Card 组件**：替代当前的 "⏸ Reply /approve..." 文字提示
+  - 显示当前 step / pending question / 操作按钮（Approve / Reject + reason 输入框）
+  - Inbox 视图（待批准动作汇总，跨 channel）—— 可选 P1
+- [ ] Slark 内联指令协议完整化（参考 [`docs/clawteam-comparison.md`](docs/clawteam-comparison.md) B-2）：
+  - `/approve` `/reject` `/abort`（Sprint 2 已落 CP3）
+  - `/comment` 添加批注但不推进 step
+  - `/override` 强制把当前 step 标 completed 并跳到下一步
+- [ ] **`/abort` 真正 kill 运行中的 agent CLI 进程**（清掉 TD-7）
+  - 集成 `agentRunRepo.listActiveInChannel` + CLIRunner 的 abort 接口
+- [ ] Workflow YAML Import / Export（清掉 TD-10）
+  - 下载：`GET /api/workflows/:id/export` → `<name>.workflow.yaml`
+  - 上传：`POST /api/projects/:id/workflows/import`（multipart）
+- [ ] **UX 增强**（清掉 TD-11）：用户触发 workflow 后前端自动跳转到该 thread
 
 ### 验收
 
-- [ ] 用户可以中断正在运行的 Workflow（`/abort`）
-- [ ] 用户可以在 await_approval step 输入反馈再 reject（`/reject 这里需要补充错误处理`）
-- [ ] reject 时反馈作为下一轮 spawn 的额外 context 注入
-- [ ] Workflow Export 出 YAML，Import 回另一个 Project 后能正常运行
+- [ ] 用户可以中断正在运行的 Workflow（`/abort` + agent 进程被 kill）
+- [ ] await_approval step 显示 Approval Card；点 Approve 推进；点 Reject 后输入 reason 推进
+- [ ] reject 时反馈作为下一轮 spawn 的额外 context 注入（Sprint 2 已生效，Sprint 3 验收 UI 流程）
+- [ ] `/comment` 在 thread 内留批注，不推进 step；`/override` 跳过当前 step
+- [ ] Workflow Export 出 YAML 文件，Import 回另一个 Project 后能正常运行
+- [ ] 用户输入 `/new-feature ...` 后，前端自动打开该 thread 看进度条
 
 ---
 

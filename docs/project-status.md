@@ -12,27 +12,35 @@
 
 | 项 | 值 |
 |---|---|
-| 当前 Sprint | **Sprint 2 — Workflow Framework** |
-| 当前焦点 | **CP1 — Workflow schema + Repo + REST**（CP8 Sprint 1 收口已完成） |
-| 上一 Sprint | Sprint 1 — Foundation + Goal → AI Team（✅ 已交付，见 [`sprint1-milestone.md`](sprint1-milestone.md)） |
+| 当前 Sprint | **Sprint 3 — Responsibility + User Intervention**（Kickoff 中，未动工） |
+| 上一 Sprint | Sprint 2 — Workflow Framework（✅ 已交付，见 [`sprint2-milestone.md`](sprint2-milestone.md)） |
+| 上上 Sprint | Sprint 1 — Foundation + Goal → AI Team（见 [`sprint1-milestone.md`](sprint1-milestone.md)） |
 | 当前分支 | `main` |
 | 类型检查 | ✅ pnpm typecheck 通过 |
 
-### 已完成的 Sprint 2 子任务
+### Sprint 2 已交付摘要
 
-- ✅ **CP8 — Sprint 1 收口**（路由 Project scope / WS agent_status 含 channel_id / StatusDot per-channel / 删除 `agents.status` / Activity Tab channel filter / D-8 沙盒 fallback 死代码清理）
+- ✅ **CP8** Sprint 1 收口（Project scope 路由 / per-channel agent status / drop `agents.status` / Activity filter / D-8 沙盒清理）
+- ✅ **CP1** Workflow schema + Repo + REST（schema_version → 4）
+- ✅ **CP2** 3 个内置模板（feature-development / bug-fix / research）+ auto-import
+- ✅ **CP3** Workflow Runner 状态机 + step 推进 + `/command` 触发 + `/approve` `/reject` `/abort` 指令解析
+- ✅ **CP4** Thread 顶部 WorkflowProgress 进度条 + `/command` 提示下拉 + WS `workflow_run_update` 实时推送
+- ✅ **CP5** 多 Project 隔离 + Sprint 2 milestone 文档
 
 ---
 
 ## 2. 当前阻塞 / 待决议
 
-无 Sprint 2 启动阻塞项。
+无 Sprint 3 启动阻塞项；可立即启动。
 
-### 已决议（Sprint 2 范围）
+### 已决议（历史，仅供检索）
 
 | # | 议题 | 决议 | 决议日期 |
 |---|------|------|---------|
-| Q-4 ✅ | Workflow YAML 的版本控制方式 | YAML 存 `workflows.definition_yaml` 单字段；**不引入** SQL 内 version 字段；YAML 顶部 `version: "1"` 作软声明；历史版本走 Export → 用户自己 git 管理；Sprint 2 简化为直接编辑 YAML 文本，Sprint 3 加 Import/Export | 2026-04-30 |
+| Q-1 ✅ | Team Architect 用哪个 runtime | Cursor Agent | 2026-04-23 |
+| Q-2 ✅ | 未装 cursor-agent 时 Seed 行为 | Welcome 页友好降级 + 兜底三件套 | 2026-04-23 |
+| Q-3 ✅ | `projects.goal` 长度上限 | 500 字符 | 2026-04-23 |
+| Q-4 ✅ | Workflow YAML 版本控制 | YAML 存 `workflows.definition_yaml` 单字段；不引入 SQL 内 version；YAML 顶部 `version: "1"` 作软声明；历史走 Export → 用户自己 git 管理 | 2026-04-30 |
 
 ### 后续 Sprint 待决议（不阻塞当前）
 
@@ -42,54 +50,66 @@
 
 ---
 
-## 3. Sprint 1 已交付（摘要）
+## 3. 已完成 Sprint 摘要
 
-详细交付清单与手动验收 runbook 见 [`sprint1-milestone.md`](sprint1-milestone.md)。
+### Sprint 2 — Workflow Framework
 
-CP1 ~ CP7 全部完成：
+详见 [`sprint2-milestone.md`](sprint2-milestone.md)。
 
-- `projects` / `agent_runs` 两张新表（schema 重构）
-- `/api/projects` CRUD + `/api/projects/suggest-team`（Team Architect）
+- `workflows` / `workflow_runs` 两张新表（schema_version → 4）
+- 3 内置模板：`feature-development` / `bug-fix` / `research`
+- WorkflowRunner 状态机：running ↔ awaiting_approval → completed/aborted/failed
+- `/command` 触发 / `/approve` `/reject` `/abort` 指令解析
+- Thread 顶部 WorkflowProgress 进度条 + `/command` 提示下拉
+
+### Sprint 1 — Foundation + Goal → AI Team
+
+详见 [`sprint1-milestone.md`](sprint1-milestone.md)。
+
+- `projects` / `agent_runs` 两张新表
+- `/api/projects` CRUD + `/api/projects/suggest-team`（Team Architect 系统 Agent）
 - Create Project 三步向导 + Sidebar Project 切换器
 - Welcome 页（fresh db 不再预置 `#general`）
 - Agent Profile 简化为 PROFILE / ACTIVITY 两 Tab
-- Engine 按 `project.workspace_path` 路由 cwd，spawn 同时记录 `agent_runs`
+- Engine 按 `project.workspace_path` 路由 cwd
 - Team Architect 兜底三件套（Q-2 / D-19）
 
 ---
 
 ## 4. 已知技术债
 
-Sprint 1 遗留的 6 项技术债已全部在 CP8 / 文档简化中清理完成。
-
-如有新发现技术债，按以下格式新增记录。
+Sprint 1 遗留的 6 项已在 CP8 中清完。Sprint 2 新增的延后项见下表（详细见 [`sprint2-milestone.md`](sprint2-milestone.md) §3）。
 
 | # | 项 | 影响 | 计划清理时机 |
 |---|---|------|------------|
-| _（暂无）_ | | | |
+| TD-7 | `/abort` 不真正 kill agent CLI 进程 | aborted run 后已 spawn 的 cursor-agent 仍跑完 | Sprint 3 — 把 `/abort` 集成 CLIRunner.abort + `agentRunRepo.listActiveInChannel` |
+| TD-8 | Workflow YAML `input` 注入仅 summary（前 1000 字符）| 长输出会被截断，下游 step 看不到完整内容 | Sprint 3+（评估是否值得加 token 预算策略） |
+| TD-9 | `/reject` reason 仅注入 prompt，不沉淀 lessons | 反馈不可复用 | Sprint 4 Scribe 落地后顺手补 |
+| TD-10 | Workflow Import / Export 未实现 | 用户只能 PATCH definition_yaml 文本 | Sprint 3 §2.5 |
+| TD-11 | 用户触发 workflow 后前端不自动跳到 thread | 体验断裂；需手动点 N replies | Sprint 3 UX 优化 |
 
 ---
 
 ## 5. 下一步建议
 
-CP8 Sprint 1 收口已完成。下一步进入 Sprint 2 主体。
+Sprint 2 已完成。进入 Sprint 3 — Responsibility + User Intervention。
 
-### CP1 ~ CP5 — Sprint 2 主体（6~8 天）
+### Sprint 3 主体（4~5 天）
 
-1. **CP1** Workflow schema + Repo + REST（1 天）
-   - `workflows` / `workflow_runs` 两张表
-   - REST：`GET/POST/PATCH/DELETE /api/projects/:id/workflows`、`GET /api/workflow-runs/:id`、`POST /api/workflow-runs/:id/abort`
-2. **CP2** YAML Parser + 3 内置模板（1.5 天）
-   - parser/validator + 3 内置模板（feature-development / bug-fix / research）
-   - 模板首次进入 Project 自动 import
-3. **CP3** Workflow Runner 核心（2~3 天，最重）
-   - 状态机：running / completed / aborted / failed
-   - 单步执行 → 等结果 → 推进下一步
-   - `await_approval` 最小暂停/继续（完整批准流见 Sprint 3）
-4. **CP4** `/command` 触发 + Thread 进度条可视化（1.5 天）
-5. **CP5** 多 Project 隔离 + Sprint 2 milestone 文档（0.5 天）
+1. **CP1** `responsibilities` 表（按 `product-brief.md` D-5）+ 从 YAML 自动推导 `executor`
+2. **CP2** Approval Card 组件 + Inbox 视图（替代当前 `⏸ Reply /approve...` 文字提示）
+3. **CP3** 内联指令协议完整化：`/comment` `/override` 落地；`/abort` 真正 kill agent runs（清掉 TD-7）
+4. **CP4** Workflow YAML Import / Export（清掉 TD-10）
+5. **CP5** UX 增强：用户触发 workflow 后自动跳 thread（清掉 TD-11）；reject reason 进 lessons 接口预留
+6. **CP6** Sprint 3 milestone
 
-详细范围与验收见 [`PLAN.md` Sprint 2](../PLAN.md#sprint-2-workflow-framework当前焦点)。
+详细范围与验收见 [`PLAN.md` Sprint 3](../PLAN.md#sprint-3-responsibility--user-intervention)。
+
+### 启动前 checklist
+
+- ✅ 无待决议项（Q-4 已落定，Sprint 3 范围内无新问题）
+- 扫 `docs/clawteam-comparison.md` §4.5：兑现 **B-2** 协调协议注入 + **B-5** Plan Approval
+- 扫 `docs/optimization-backlog.md`：评估是否将 **O-1** Task in_progress 自动触发 assignee 纳入 Sprint 3
 
 ---
 
