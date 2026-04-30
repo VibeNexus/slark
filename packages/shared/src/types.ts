@@ -320,6 +320,28 @@ export interface WorkflowRunState {
 }
 
 // =============================================================================
+// Onboarding Loop — project_onboarding + agent_skills (Sprint 6 / D-20)
+// =============================================================================
+
+export interface ProjectOnboarding {
+  project_id: string;
+  overview: string;
+  tech_stack: string[];
+  conventions: string | null;
+  ready: boolean;
+  generated_at: number;
+}
+
+export interface AgentSkill {
+  id: number;
+  agent_id: string;
+  project_id: string;
+  skill_key: string;
+  touch_count: number;
+  last_touched: number;
+}
+
+// =============================================================================
 // Evolution Loop — observations + feedback (Sprint 5 / D-20)
 // =============================================================================
 

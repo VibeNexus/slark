@@ -334,3 +334,42 @@ CREATE INDEX IF NOT EXISTS idx_feedback_agent
   ON agent_feedback(agent_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_feedback_status
   ON agent_feedback(agent_id, status);
+
+-- =============================================================================
+-- 18. project_onboarding (Sprint 6 引入，对齐 D-20 Onboarding Loop)
+--
+-- 新 Project 创建后由 Onboarder 自动产出，summarizes README / package.json /
+-- recent commits 给 ContextBuilder 注入和欢迎页展示。
+-- 1 Project 1 行；重新 onboard 时覆盖。
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS project_onboarding (
+  project_id      TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  overview        TEXT NOT NULL,
+  /** JSON 数组 */
+  tech_stack_json TEXT NOT NULL DEFAULT '[]',
+  /** 项目约定（编码风格 / branch 命名 / commit 风格 等）*/
+  conventions     TEXT,
+  /** 建议初始 lessons 候选个数（仅展示用） */
+  ready           INTEGER NOT NULL DEFAULT 1,
+  generated_at    INTEGER NOT NULL
+);
+
+-- =============================================================================
+-- 19. agent_skills (Sprint 6 引入)
+--
+-- 由 tool_call.completed 事件自动统计。skill_key = 顶级路径段（如 "src/auth"
+-- 或 "tests"）；touch_count 记录该 agent 在该路径下读/写的次数。
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS agent_skills (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id        TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  skill_key       TEXT NOT NULL,
+  touch_count     INTEGER NOT NULL DEFAULT 0,
+  last_touched    INTEGER NOT NULL,
+  UNIQUE(agent_id, project_id, skill_key)
+);
+CREATE INDEX IF NOT EXISTS idx_skills_agent
+  ON agent_skills(agent_id, touch_count DESC);
+CREATE INDEX IF NOT EXISTS idx_skills_project_key
+  ON agent_skills(project_id, skill_key);

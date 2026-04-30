@@ -18,6 +18,7 @@ import type {
   AgentObservation,
   AgentRun,
   AgentRunStatus,
+  AgentSkill,
   ActivityType,
   Channel,
   ChatMessage,
@@ -27,6 +28,7 @@ import type {
   MessageMetadata,
   ObservationPolarity,
   Project,
+  ProjectOnboarding,
   Responsibility,
   ResponsibilityAuthority,
   ResponsibilityRole,
@@ -1875,5 +1877,175 @@ export const feedbackRepo = {
     values.push(id);
     db.prepare(`UPDATE agent_feedback SET ${fields.join(', ')} WHERE id = ?`).run(...values);
     return this.getById(db, id);
+  },
+};
+
+// =============================================================================
+// Project Onboarding (Sprint 6 / D-20)
+// =============================================================================
+
+interface OnboardingRow {
+  project_id: string;
+  overview: string;
+  tech_stack_json: string;
+  conventions: string | null;
+  ready: number;
+  generated_at: number;
+}
+
+function rowToOnboarding(r: OnboardingRow): ProjectOnboarding {
+  let stack: string[] = [];
+  try {
+    const parsed = JSON.parse(r.tech_stack_json);
+    if (Array.isArray(parsed)) stack = parsed.filter((x) => typeof x === 'string');
+  } catch {
+    /* ignore */
+  }
+  return {
+    project_id: r.project_id,
+    overview: r.overview,
+    tech_stack: stack,
+    conventions: r.conventions,
+    ready: r.ready === 1,
+    generated_at: r.generated_at,
+  };
+}
+
+export const onboardingRepo = {
+  getByProject(db: Database, projectId: string): ProjectOnboarding | null {
+    const row = db
+      .prepare('SELECT * FROM project_onboarding WHERE project_id = ?')
+      .get(projectId) as OnboardingRow | undefined;
+    return row ? rowToOnboarding(row) : null;
+  },
+
+  upsert(
+    db: Database,
+    input: {
+      project_id: string;
+      overview: string;
+      tech_stack: string[];
+      conventions?: string | null;
+    },
+  ): ProjectOnboarding {
+    const ts = now();
+    db.prepare(
+      `INSERT INTO project_onboarding (project_id, overview, tech_stack_json, conventions, ready, generated_at)
+       VALUES (?, ?, ?, ?, 1, ?)
+       ON CONFLICT(project_id) DO UPDATE SET
+         overview = excluded.overview,
+         tech_stack_json = excluded.tech_stack_json,
+         conventions = excluded.conventions,
+         ready = 1,
+         generated_at = excluded.generated_at`,
+    ).run(
+      input.project_id,
+      input.overview,
+      JSON.stringify(input.tech_stack),
+      input.conventions ?? null,
+      ts,
+    );
+    const got = this.getByProject(db, input.project_id);
+    if (!got) throw new Error('onboarding upsert failed');
+    return got;
+  },
+
+  remove(db: Database, projectId: string): void {
+    db.prepare('DELETE FROM project_onboarding WHERE project_id = ?').run(projectId);
+  },
+};
+
+// =============================================================================
+// Agent Skills (Sprint 6 / D-20 Skill Matrix)
+// =============================================================================
+
+interface SkillRow {
+  id: number;
+  agent_id: string;
+  project_id: string;
+  skill_key: string;
+  touch_count: number;
+  last_touched: number;
+}
+
+function rowToSkill(r: SkillRow): AgentSkill {
+  return {
+    id: r.id,
+    agent_id: r.agent_id,
+    project_id: r.project_id,
+    skill_key: r.skill_key,
+    touch_count: r.touch_count,
+    last_touched: r.last_touched,
+  };
+}
+
+export const skillRepo = {
+  listByAgent(db: Database, agentId: string, limit = 50): AgentSkill[] {
+    const rows = db
+      .prepare(
+        `SELECT * FROM agent_skills WHERE agent_id = ?
+         ORDER BY touch_count DESC, last_touched DESC LIMIT ?`,
+      )
+      .all(agentId, limit) as SkillRow[];
+    return rows.map(rowToSkill);
+  },
+
+  listByProject(db: Database, projectId: string, limit = 200): AgentSkill[] {
+    const rows = db
+      .prepare(
+        `SELECT * FROM agent_skills WHERE project_id = ?
+         ORDER BY touch_count DESC, last_touched DESC LIMIT ?`,
+      )
+      .all(projectId, limit) as SkillRow[];
+    return rows.map(rowToSkill);
+  },
+
+  /** 按 keyword 推荐 agent：在 project 内匹配 skill_key 包含 keyword 的 agent，按 count 排序 */
+  suggestAgents(
+    db: Database,
+    projectId: string,
+    keyword: string,
+    limit = 5,
+  ): Array<{ agent_id: string; total_count: number; matched_keys: string[] }> {
+    if (!keyword.trim()) return [];
+    const rows = db
+      .prepare(
+        `SELECT agent_id, SUM(touch_count) AS total_count,
+                GROUP_CONCAT(skill_key, '|') AS keys
+         FROM agent_skills
+         WHERE project_id = ? AND skill_key LIKE ?
+         GROUP BY agent_id
+         ORDER BY total_count DESC LIMIT ?`,
+      )
+      .all(projectId, `%${keyword.trim()}%`, limit) as Array<{
+      agent_id: string;
+      total_count: number;
+      keys: string;
+    }>;
+    return rows.map((r) => ({
+      agent_id: r.agent_id,
+      total_count: r.total_count,
+      matched_keys: r.keys.split('|'),
+    }));
+  },
+
+  /**
+   * 增加 agent 在 (project, skill_key) 的 touch_count。
+   * 一次 spawn 内同 key 多次 tool_call 也只 +1（用 dedup 集合预过滤后再批量调用）。
+   */
+  bumpTouch(
+    db: Database,
+    agentId: string,
+    projectId: string,
+    skillKey: string,
+  ): void {
+    const ts = now();
+    db.prepare(
+      `INSERT INTO agent_skills (agent_id, project_id, skill_key, touch_count, last_touched)
+       VALUES (?, ?, ?, 1, ?)
+       ON CONFLICT(agent_id, project_id, skill_key) DO UPDATE SET
+         touch_count = touch_count + 1,
+         last_touched = excluded.last_touched`,
+    ).run(agentId, projectId, skillKey, ts);
   },
 };
