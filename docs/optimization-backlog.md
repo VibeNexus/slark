@@ -2,6 +2,8 @@
 
 > **本文档的角色**：记录"**已决定要做、尚未排期**"的优化条目，作为 `PLAN.md` 的前置队列。
 >
+> **不维护项目状态**：当前 Sprint / 阻塞 / 技术债见 [`docs/project-status.md`](project-status.md)。本文档只放未排期的 O-N 条目。
+>
 > **定位对比**：
 >
 > | 文档 | 性质 | 内容 |
@@ -72,9 +74,11 @@
 
 ### O-1: Task 状态变更 `in_progress` 自动触发 assignee
 
-**状态**: `[待排期]`
+**状态**: `[待排期]`（建议 Sprint 2 Workflow Runner 落地后再评估）
 
 **优先级**: 🔴 高（低成本、高价值，补齐 v0 MVP Tasks 面板的协作闭环）
+
+> **排期建议（2026-04-30）**：本条目和 Sprint 2 Workflow Runner 都属于"自动触发 Agent"语义，先做 Workflow Runner 把触发入口的语义统一，再按相同入口接 Task → Agent，避免短期内出现两套触发实现。
 
 **来源**: `routa-analysis.md` §5.2 B-6 + 2026-04-23 讨论收敛
 
@@ -537,6 +541,7 @@ ORDER BY created_at ASC;
 |------|------|------|------|
 | v0.1 | 2026-04-23 | 初版：O-1 ~ O-4 Task 设施优化条目；废弃"Reviewer 自动触发"决策 | - |
 | v0.2 | 2026-04-23 | 对齐 `PLAN.md v1.0.1` Sprint 路线图：流向图 `MVP-N` → `Sprint-N`；状态标记约定同步；O-1/O-3/O-4 内文的 `MVP-N` 引用替换为 `v0 MVP` / `v1.0 Sprint`；`product-brief.md` 引用章节号按 v1.0 结构调整 | - |
+| **v0.3** | 2026-04-30 | 文档体系简化对齐：头部声明"项目状态见 `project-status.md`"；O-1 加排期建议（等 Sprint 2 Workflow Runner 后再做） | - |
 
 ---
 

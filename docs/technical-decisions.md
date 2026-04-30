@@ -30,6 +30,8 @@
 
 **冲突规则**：本文档与 product-brief 冲突时，**以 product-brief 为准**。本文档只负责承载"实现细节"，不决定产品定位。
 
+> **关于"目标状态" vs "当前实际状态"**：本文档描述的是**目标决策**。当前代码可能因为兼容旧版本仍处于过渡状态（例如 D-1 / D-8 描述了"已废除"但代码仍保留 v0 兼容字段）。**实施进度与技术债以 [`docs/project-status.md`](project-status.md) 为准**，本文档不重复维护。
+
 ---
 
 ## D-1: Agent 状态机（重定义，适配 spawn-per-message 模型）
@@ -48,12 +50,14 @@
 
 ### 存储方式（v1.0.1 修订）
 
-原 `agents.status` 单值字段**已废除**（v0 设计的隔离缺陷 K-1）。状态改为 **per-channel 派生**：
+**目标状态**：原 `agents.status` 单值字段**废除**（v0 设计的隔离缺陷 K-1）；状态改为 **per-channel 派生**：
 
 - 新建 `agent_runs(id, agent_id, channel_id, status, started_at, ended_at)` 表记录每次 spawn
 - 查询 Agent 在指定 channel 的当前状态：`SELECT status FROM agent_runs WHERE agent_id=? AND channel_id=? AND ended_at IS NULL`
 - Sidebar 全局状态点派生自 "any active run"；DM Header 等精细位置显示 per-channel 状态
 - 详见 `product-brief.md §D-7 K-1`
+
+> **⚠ 当前过渡状态（TD-2 / TD-3，见 `docs/project-status.md`）**：`agent_runs` 表已写入并是 engine 端事实来源；`agents.status` 字段仍保留并双写以兼容旧前端。Sidebar StatusDot 仍读 `agents.status`，**未按 channel 派生**。Sprint 2 一并清理。
 
 ### 理由
 
@@ -282,6 +286,8 @@ const cwd = project.workspace_path;  // 必填（D-13），不再有兜底
 
 - `projects.workspace_path` 是 `NOT NULL`
 - 不存在"纯聊天 Project"的回退路径（N-11）
+
+> **⚠ 当前过渡状态（TD-4，见 `docs/project-status.md`）**：CLIRunner 在 channel 没有 project_id 时仍有 `~/.slark/agents/{id}/` 兜底；Create Agent 也仍 mkdir 沙盒目录。所有运行时已切到 `project.workspace_path`，但死代码未删。所有 v0 channel 都迁完后清理。
 
 ### Agent 记忆的承载机制
 
@@ -755,5 +761,6 @@ CREATE TABLE agent_skills (
 | 版本 | 日期 | 变更 |
 |------|------|------|
 | v0 | ~2026-04-22 | 初版 D-1 ~ D-12 + O-1 ~ O-4，支撑 v0 MVP |
-| **v1.0.1** | 2026-04-23 | 对齐 `product-brief.md v1.0.1`：修订 D-1 (状态 per-channel)、D-3 (activity 加 channel_id)、D-6 (链式 per-thread)、D-8 (workspace 废除)、D-9 (seed 不预置)；新增 D-13 ~ D-20 (Project / Goal / System Agents / Workflow / Responsibilities / 隔离契约 / 兜底三件套 / 4 Loop)；O-1 / O-2 / O-4 的 Phase/MVP-N 引用改为 Sprint-N / v0 MVP |
+| v1.0.1 | 2026-04-23 | 对齐 `product-brief.md v1.0.1`：修订 D-1 (状态 per-channel)、D-3 (activity 加 channel_id)、D-6 (链式 per-thread)、D-8 (workspace 废除)、D-9 (seed 不预置)；新增 D-13 ~ D-20 (Project / Goal / System Agents / Workflow / Responsibilities / 隔离契约 / 兜底三件套 / 4 Loop) |
+| **v1.1** | 2026-04-30 | **文档体系简化**：在头部声明"实施进度以 `project-status.md` 为准"；D-1 / D-8 加"⚠ 当前过渡状态"标注（指向 TD-N）；不再在本文档维护落地进度 |
 
