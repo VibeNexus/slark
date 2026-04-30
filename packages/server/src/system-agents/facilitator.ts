@@ -17,8 +17,8 @@
 
 import { FACILITATOR_TIMEOUT_MS } from '@slark/shared';
 import type { Agent, Project } from '@slark/shared';
-import { CursorAdapter } from '../agents/cursor-adapter.js';
-import { runCLI } from '../agents/runner.js';
+import { createCursorAdapter } from '../agents/adapter-factory.js';
+import { runWithAdapter } from '../agents/runner.js';
 import { parseWorkflowYaml, WorkflowYamlError } from '../workflows/yaml-parser.js';
 
 interface FacilitatorLogger {
@@ -48,12 +48,12 @@ export async function runFacilitator(
   input: FacilitatorInput,
   logger: FacilitatorLogger = consoleLog,
 ): Promise<FacilitatorOutput> {
-  const adapter = new CursorAdapter();
+  const adapter = createCursorAdapter();
   const install = await adapter.checkInstallation();
   if (!install.installed) {
     return {
       ok: false,
-      fallback_reason: `cursor-agent not installed${install.error ? `: ${install.error}` : ''}`,
+      fallback_reason: `${adapter.name} not available${install.error ? `: ${install.error}` : ''}`,
     };
   }
   if (input.agents.length === 0) {
@@ -61,9 +61,12 @@ export async function runFacilitator(
   }
 
   const prompt = buildFacilitatorPrompt(input);
-  const spec = adapter.buildCommand({ prompt, permissive: false });
   try {
-    const result = await runCLI(adapter, spec, { timeoutMs: FACILITATOR_TIMEOUT_MS });
+    const result = await runWithAdapter(
+      adapter,
+      { prompt, permissive: false },
+      { timeoutMs: FACILITATOR_TIMEOUT_MS },
+    );
     if (result.timedOut) return { ok: false, fallback_reason: 'Facilitator timed out' };
     if (result.aborted) return { ok: false, fallback_reason: 'Facilitator aborted' };
     if (result.events.some((e) => e.type === 'error')) {

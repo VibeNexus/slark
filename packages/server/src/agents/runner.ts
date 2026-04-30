@@ -5,6 +5,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { PROCESS_TIMEOUT_MS } from '@slark/shared';
 import type {
+  BuildCommandParams,
   CLIAdapter,
   CLIEvent,
   RunnerOptions,
@@ -15,6 +16,26 @@ import type {
 export interface RunningProcess {
   child: ChildProcess;
   abort: () => void;
+}
+
+/**
+ * 统一入口（推荐）：根据 adapter 类型自动选择 spawn-派 / api-direct 派路径。
+ *
+ * - adapter.runDirect 存在 → 直接调用（CursorSdkAdapter 等）
+ * - 否则 → buildCommand + spawn 子进程（CursorAdapter / CodexAdapter / ClaudeAdapter）
+ *
+ * 新代码统一用此函数，老代码渐进迁移。
+ */
+export async function runWithAdapter(
+  adapter: CLIAdapter,
+  params: BuildCommandParams,
+  options: RunnerOptions = {},
+): Promise<RunnerResult> {
+  if (adapter.runDirect) {
+    return adapter.runDirect(params, options);
+  }
+  const spec = adapter.buildCommand(params);
+  return runCLI(adapter, spec, options);
 }
 
 export async function runCLI(

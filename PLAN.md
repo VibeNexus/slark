@@ -208,6 +208,24 @@ CP1 ~ CP6 已交付：`workflow_sessions` 表（schema_version → 9）+ Facilit
 
 ---
 
+### Sprint 4-ext：Cursor SDK Adapter 旁路 ✅（2026-04-30）
+
+跨 Sprint 顺手项，源自 [`docs/cursorsdkadapter.md`](docs/cursorsdkadapter.md) 调研。落地 🔴 短期 3 项：
+
+- **S-1** `CursorSdkAdapter`：`@cursor/sdk` 直连派 adapter，与 `CursorAdapter`（spawn cursor-agent）并存；环境变量 `SLARK_CURSOR_BACKEND=sdk|cli` 切换；`CLIAdapter.runDirect?` 钩子 + `runWithAdapter()` 统一 dispatcher
+- **S-2** SDK 标准化 `SDKToolUseMessage` 直接给 `{ name, args, result, status, truncated }`，避免 cursor-agent 内部 `xxxToolCall` 后缀脆弱解析
+- **S-3** `summarizeToolArgs` 工具模块 + 接入 `ActivityRecorder`，给 D-3 Activity Tab 输出 `Shell: ls -la /path` 风格摘要
+
+实现要点：
+- 全部 6 个 System Agent + AgentEngine 切到 `runWithAdapter`，让 backend 切换贯通整条调用链
+- `@cursor/sdk` 通过 lazy dynamic import 引入，**默认 `cli` 模式启动不触发 SDK / sqlite3 加载**，向后兼容
+- 启用 `sdk` 模式需要 `CURSOR_API_KEY` + `pnpm approve-builds` 编译 sqlite3 native binding（详见 [`cursorsdkadapter.md` §9](docs/cursorsdkadapter.md)）
+- Smoke verify：`packages/server/scripts/verify-sdk-adapter.ts`（无需 SQLite，独立可跑）
+
+**未落地 / 暂缓**：S-4 Subagents 重构（待 SDK GA + spike）、S-5/6 设计参考（纳入 R-19/R-25）、S-7/8/9 远期（cloud / Hooks）。详见 [`cursorsdkadapter.md`](docs/cursorsdkadapter.md) 顶部状态表。
+
+---
+
 ## Sprint 8+: 远期路线
 
 按 [`docs/product-brief.md`](docs/product-brief.md) §7（P2 R-18~R-25）+ [`docs/clawteam-comparison.md`](docs/clawteam-comparison.md) B-N 排序：
@@ -249,3 +267,4 @@ CP1 ~ CP6 已交付：`workflow_sessions` 表（schema_version → 9）+ Facilit
 | v1.0 | 2026-04-23 | 按 `product-brief.md` v1.0 重写：Sprint 1~6 路线 + Sprint 1 详细任务 |
 | v1.0.1 | 2026-04-23 | 同步 v1.0.1 Review 决议：Sprint 1 工期弹性、删库迁移、Sprint 4 拆分 Sprint 7 |
 | **v1.1** | 2026-04-30 | **文档体系简化**：状态收敛到 `docs/project-status.md`；Sprint 1 详细任务清单移至 `docs/sprint1-milestone.md`；v0 MVP 已交付清单折叠为一句话；当前焦点改为 Sprint 2 |
+| v1.2 | 2026-04-30 | Sprint 1~7 全部交付，MVP 完成；新增 Sprint 4-ext（Cursor SDK Adapter 旁路）落地记录 |

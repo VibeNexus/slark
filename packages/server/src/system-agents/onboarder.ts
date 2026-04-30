@@ -15,8 +15,8 @@ import { readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ONBOARDER_TIMEOUT_MS } from '@slark/shared';
 import type { Database } from 'better-sqlite3';
-import { CursorAdapter } from '../agents/cursor-adapter.js';
-import { runCLI } from '../agents/runner.js';
+import { createCursorAdapter } from '../agents/adapter-factory.js';
+import { runWithAdapter } from '../agents/runner.js';
 import { onboardingRepo, projectRepo } from '../db/repos.js';
 
 interface OnboarderLogger {
@@ -58,8 +58,8 @@ export async function runOnboarderForProject(
     /* ignore */
   }
 
-  // 没装 cursor-agent 或 workspace 完全空白 → 写一个 fallback
-  const adapter = new CursorAdapter();
+  // 没装 cursor backend 或 workspace 完全空白 → 写一个 fallback
+  const adapter = createCursorAdapter();
   const install = await adapter.checkInstallation();
   if (!install.installed || (!readme && !pkgJson && recentCommits.length === 0)) {
     onboardingRepo.upsert(db, {
@@ -68,15 +68,18 @@ export async function runOnboarderForProject(
       tech_stack: deriveQuickStack(pkgJson),
       conventions: null,
     });
-    logger.info(`[onboarder] ${project.name}: minimal fallback (no cursor-agent or empty workspace)`);
+    logger.info(`[onboarder] ${project.name}: minimal fallback (no cursor backend or empty workspace)`);
     return;
   }
 
-  // 2. spawn cursor-agent
+  // 2. 跑 cursor backend（cli/sdk 二选一）
   const prompt = buildOnboarderPrompt(project.name, project.goal, readme, pkgJson, recentCommits);
-  const spec = adapter.buildCommand({ prompt, permissive: false });
   try {
-    const result = await runCLI(adapter, spec, { timeoutMs: ONBOARDER_TIMEOUT_MS });
+    const result = await runWithAdapter(
+      adapter,
+      { prompt, permissive: false },
+      { timeoutMs: ONBOARDER_TIMEOUT_MS },
+    );
     if (result.timedOut || result.aborted) {
       logger.warn(`[onboarder] ${project.name}: timed out / aborted; using fallback`);
       onboardingRepo.upsert(db, {

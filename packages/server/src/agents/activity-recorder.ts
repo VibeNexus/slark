@@ -16,6 +16,7 @@
 
 import type { Database } from 'better-sqlite3';
 import { activityRepo } from '../db/repos.js';
+import { summarizeToolArgs } from './summarize-tool-args.js';
 import type { CLIEvent } from './types.js';
 
 export class ActivityRecorder {
@@ -52,15 +53,17 @@ export class ActivityRecorder {
         }
         break;
 
-      case 'tool.started':
+      case 'tool.started': {
         this.hasEmittedWorking = true;
+        const summary = summarizeToolArgs(event.tool, event.args);
         activityRepo.append(this.db, {
           agent_id: this.agentId,
           channel_id: this.channelId,
           type: 'working',
-          detail: `${event.tool}: ${this.summarize(event.args)}`,
+          detail: summary ? `${event.tool}: ${summary}` : event.tool,
         });
         break;
+      }
 
       case 'tool.completed':
         activityRepo.append(this.db, {
@@ -92,10 +95,5 @@ export class ActivityRecorder {
       default:
         break;
     }
-  }
-
-  private summarize(args: Record<string, unknown>): string {
-    const s = JSON.stringify(args);
-    return s.length > 200 ? s.slice(0, 200) + '...' : s;
   }
 }

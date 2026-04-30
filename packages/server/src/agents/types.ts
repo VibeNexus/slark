@@ -69,6 +69,16 @@ export interface CLIAdapter {
   buildCommand(params: BuildCommandParams): SpawnSpec;
   parseLine(line: string): CLIEvent[];
   getSupportedModels(): Promise<string[]>;
+
+  /**
+   * S-1：API-direct 派 adapter 的入口（如 CursorSdkAdapter）。
+   *
+   * 实现该方法的 adapter 会被 `runWithAdapter` 优先调用，runner 跳过 spawn / parseLine
+   * 流程，由 adapter 自行驱动 SDK 流式返回并 emit `CLIEvent`。
+   *
+   * 不实现：使用默认的 spawn-spec 路径（buildCommand + parseLine）。
+   */
+  runDirect?(params: BuildCommandParams, options: RunnerOptions): Promise<RunnerResult>;
 }
 
 export interface BuildCommandParams {

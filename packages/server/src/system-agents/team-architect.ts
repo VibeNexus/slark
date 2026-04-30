@@ -13,8 +13,8 @@
 
 import { TEAM_ARCHITECT_TIMEOUT_MS } from '@slark/shared';
 import type { TeamSuggestion, TeamSuggestionAgent } from '@slark/shared';
-import { CursorAdapter } from '../agents/cursor-adapter.js';
-import { runCLI } from '../agents/runner.js';
+import { createCursorAdapter } from '../agents/adapter-factory.js';
+import { runWithAdapter } from '../agents/runner.js';
 
 // =============================================================================
 // 公共接口
@@ -31,13 +31,13 @@ export interface SuggestTeamInput {
 }
 
 export async function suggestTeam(input: SuggestTeamInput): Promise<TeamSuggestion> {
-  const adapter = new CursorAdapter();
+  const adapter = createCursorAdapter();
 
-  // 1. 预检查：cursor-agent 是否已安装
+  // 1. 预检查：cursor backend 是否可用（cursor-agent / SDK 二选一，由环境变量决定）
   const install = await adapter.checkInstallation();
   if (!install.installed) {
     return fallbackTeam(
-      `cursor-agent not installed${install.error ? `: ${install.error}` : ''}`,
+      `${adapter.name} not available${install.error ? `: ${install.error}` : ''}`,
     );
   }
 
@@ -50,15 +50,13 @@ export async function suggestTeam(input: SuggestTeamInput): Promise<TeamSuggesti
   // 给出推荐，不需要实际读取项目文件 —— prompt 内部已包含 workspace_path
   // 作为上下文信息，spawn cwd 留给 Node.js 默认值（process.cwd()）即可。
   const prompt = buildTeamArchitectPrompt(input);
-  const spec = adapter.buildCommand({
-    prompt,
-    permissive: false,
-  });
 
   try {
-    const result = await runCLI(adapter, spec, {
-      timeoutMs: TEAM_ARCHITECT_TIMEOUT_MS,
-    });
+    const result = await runWithAdapter(
+      adapter,
+      { prompt, permissive: false },
+      { timeoutMs: TEAM_ARCHITECT_TIMEOUT_MS },
+    );
 
     if (result.timedOut) {
       return fallbackTeam('Team Architect spawn timed out');

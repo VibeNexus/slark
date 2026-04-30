@@ -14,6 +14,20 @@
 > - `cursor-agent` 子进程出问题（兜底失败 / 解析报错）需要替代方案时
 > - 远期评估 cloud runtime 解锁 Slark 哪些路线时（`R-23` / `B-1`）
 
+> **落地状态摘要（2026-04-30 更新）**：
+>
+> | 条目 | 状态 | 落地 commit / 说明 |
+> |------|------|--------------------|
+> | `S-1` CursorSdkAdapter 旁路 | ✅ 已落地（Sprint 4-ext） | `packages/server/src/agents/cursor-sdk-adapter.ts` + `adapter-factory.ts`，环境变量 `SLARK_CURSOR_BACKEND=sdk\|cli` 切换 |
+> | `S-2` SDK 标准 tool_call schema | ✅ 已落地（Sprint 4-ext） | `CursorSdkAdapter.mapSdkMessage()` 直接映射 `SDKToolUseMessage`；`CursorAdapter` 保留旧解析以兼容 cursor-agent 子进程 |
+> | `S-3` summarizeToolArgs Activity 摘要 | ✅ 已落地（Sprint 4-ext） | `packages/server/src/agents/summarize-tool-args.ts` + `activity-recorder.ts` |
+> | `S-4` Subagents 重构 System Agent | ⏸️ 暂缓 | 等 SDK GA + 与 D-1 per-channel 隔离 spike 后再评估 |
+> | `S-5` agent-kanban grouping | 📐 仅设计参考 | Sprint 8+ R-19 落地时再迁移 |
+> | `S-6` Project name 自动生成 | ⏸️ 暂缓 | 纳入 R-25 Project UX 打磨 |
+> | `S-7` Cloud runtime opt-in | 🔒 远期 | Sprint 8+，必须 per-Project opt-in（合规约束）|
+> | `S-8` Agent.resume 长任务 | 🔒 远期 | 依赖 `S-7` |
+> | `S-9` Hooks 协同 ApprovalCard | 🔒 远期 | Sprint 8+ |
+
 ---
 
 ## 1. 一句话结论
@@ -439,17 +453,70 @@ type AgentCard = {
 
 ### Slark 内部相关
 
-- [`packages/server/src/agents/types.ts`](../packages/server/src/agents/types.ts) — `CLIAdapter` 接口（`S-1` 实现入口）
-- [`packages/server/src/agents/cursor-adapter.ts`](../packages/server/src/agents/cursor-adapter.ts) — 当前 `CursorAdapter` 实现（`S-2` 替换目标）
-- [`packages/server/src/agents/activity-recorder.ts`](../packages/server/src/agents/activity-recorder.ts) — `D-3` Activity 写入点（`S-3` 落地点）
+- [`packages/server/src/agents/types.ts`](../packages/server/src/agents/types.ts) — `CLIAdapter` 接口（含 `runDirect?` 钩子，`S-1` 实现入口）
+- [`packages/server/src/agents/runner.ts`](../packages/server/src/agents/runner.ts) — `runWithAdapter()` 统一 dispatcher（spawn-派 / api-direct-派）
+- [`packages/server/src/agents/adapter-factory.ts`](../packages/server/src/agents/adapter-factory.ts) — `createCursorAdapter()`，按 `SLARK_CURSOR_BACKEND` 切换
+- [`packages/server/src/agents/cursor-adapter.ts`](../packages/server/src/agents/cursor-adapter.ts) — 当前 `CursorAdapter`（spawn 子进程派，默认）
+- [`packages/server/src/agents/cursor-sdk-adapter.ts`](../packages/server/src/agents/cursor-sdk-adapter.ts) — `CursorSdkAdapter`（`S-1` + `S-2` 落地点；lazy-import 避免默认启动加载 sqlite3）
+- [`packages/server/src/agents/summarize-tool-args.ts`](../packages/server/src/agents/summarize-tool-args.ts) — `S-3` Activity 摘要工具
+- [`packages/server/src/agents/activity-recorder.ts`](../packages/server/src/agents/activity-recorder.ts) — `D-3` Activity 写入点（已接 `summarizeToolArgs`）
+- [`packages/server/scripts/verify-sdk-adapter.ts`](../packages/server/scripts/verify-sdk-adapter.ts) — Smoke 验证脚本（无需 SQLite，可直接 `tsx` 跑）
 - [`docs/technical-decisions.md`](technical-decisions.md) §D-9 / §D-12 / §D-15 / §D-19 — 与 `S-1` 强相关的现有决策
 - [`docs/product-brief.md`](product-brief.md) §S-5 / §K-5 / §R-23 — 与 `S-7` 强相关的成功标准 / 已知坑 / 远期路线
 - [`docs/phase0-cli-spike.md`](phase0-cli-spike.md) — 当前 `cursor-agent` 子进程方案的性能基线（4.5s 首 token）
 
 ---
 
-## 9. 版本历史
+## 9. 运维与启用指南（v1.1）
+
+### 9.1 选择后端
+
+| 环境变量 | 行为 | 前置条件 |
+|----------|------|---------|
+| 未设置 / `SLARK_CURSOR_BACKEND=cli`（默认）| 走 `CursorAdapter`，spawn `cursor-agent` 子进程 | 需要本机已安装 `cursor-agent` 并已登录（与原状一致） |
+| `SLARK_CURSOR_BACKEND=sdk` | 走 `CursorSdkAdapter`，使用 `@cursor/sdk` 直连 | 需要 `CURSOR_API_KEY` 环境变量 + sqlite3 native binding 已编译（见 9.2） |
+
+### 9.2 启用 SDK 后端的额外步骤
+
+`@cursor/sdk` 间接依赖 `sqlite3@^5.1.7`（native binding）。pnpm 默认会因为安全策略
+不自动构建第三方 native 模块；首次启用时需要：
+
+```bash
+# 1. 配 API key（从 https://cursor.com/dashboard/integrations 获取）
+export CURSOR_API_KEY=...
+
+# 2. 让 pnpm 允许 sqlite3 编译（一次性）
+pnpm approve-builds   # 选择 sqlite3 -> Yes
+
+# 3. 切到 SDK 后端启动 server
+SLARK_CURSOR_BACKEND=sdk pnpm dev
+```
+
+> 默认（cli）模式下，**`@cursor/sdk` 通过 lazy dynamic import 引入**，启动时不会触发
+> sqlite3 加载，因此默认用户无需任何额外操作。
+
+### 9.3 验证
+
+```bash
+# 不依赖 SQLite，verify adapter factory + summarizer 行为
+pnpm --filter @slark/server exec tsx scripts/verify-sdk-adapter.ts
+
+# 或带上 SDK 模式（仍不会真打 Cursor API，仅检查代码路径）
+SLARK_CURSOR_BACKEND=sdk pnpm --filter @slark/server exec tsx scripts/verify-sdk-adapter.ts
+```
+
+### 9.4 选择策略建议
+
+- **个人开发者 + 已装 cursor-agent** → 默认 `cli` 即可
+- **团队 / 服务部署 + 不想依赖 cursor-agent CLI** → `sdk`，统一用 API key 管理
+- **想测试 SDK 解析稳定性** → 启 `sdk`，看 `tool_call` 解析是否更可靠（解决 `D-9` 兜底）
+- **未来要上 cloud runtime / Subagents** → 必须切 `sdk`（`S-7` / `S-4`）
+
+---
+
+## 10. 版本历史
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
 | v1.0 | 2026-04-30 | 初版：基于 `cursor/cookbook` + `@cursor/sdk` public beta 文档调研，提出 `S-1` ~ `S-9` 9 个引入条目，附 Sprint 映射 |
+| v1.1 | 2026-04-30 | Sprint 4-ext 落地：`S-1` `CursorSdkAdapter` + `S-2` SDK schema + `S-3` `summarizeToolArgs`；接口增 `runDirect?` 钩子，`runWithAdapter` 统一 dispatcher；新增运维章节（§9）|

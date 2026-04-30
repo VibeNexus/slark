@@ -20,8 +20,8 @@
 import { COACH_NEGATIVE_THRESHOLD, COACH_TIMEOUT_MS, EVALUATOR_WINDOW_MS } from '@slark/shared';
 import type { Agent, AgentFeedback, AgentObservation } from '@slark/shared';
 import type { Database } from 'better-sqlite3';
-import { CursorAdapter } from '../agents/cursor-adapter.js';
-import { runCLI } from '../agents/runner.js';
+import { createCursorAdapter } from '../agents/adapter-factory.js';
+import { runWithAdapter } from '../agents/runner.js';
 import {
   agentRepo,
   feedbackRepo,
@@ -56,7 +56,7 @@ export async function runCoachOnce(
     proposals_created: 0,
     skipped: [],
   };
-  const adapter = new CursorAdapter();
+  const adapter = createCursorAdapter();
   const install = await adapter.checkInstallation();
   if (!install.installed) return summary;
 
@@ -108,10 +108,13 @@ export async function runCoachForAgent(
   const observations = observationRepo.listByAgent(db, agent.id, { since, limit: 50 });
   if (observations.length === 0) return null;
 
-  const adapter = new CursorAdapter();
+  const adapter = createCursorAdapter();
   const prompt = buildCoachPrompt(agent, observations, hot);
-  const spec = adapter.buildCommand({ prompt, permissive: false });
-  const result = await runCLI(adapter, spec, { timeoutMs: COACH_TIMEOUT_MS });
+  const result = await runWithAdapter(
+    adapter,
+    { prompt, permissive: false },
+    { timeoutMs: COACH_TIMEOUT_MS },
+  );
   if (result.timedOut || result.aborted) {
     throw new Error(result.timedOut ? 'coach timed out' : 'coach aborted');
   }

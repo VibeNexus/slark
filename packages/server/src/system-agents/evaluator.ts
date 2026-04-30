@@ -21,8 +21,9 @@ import type {
   ObservationPolarity,
 } from '@slark/shared';
 import type { Database } from 'better-sqlite3';
-import { CursorAdapter } from '../agents/cursor-adapter.js';
-import { runCLI } from '../agents/runner.js';
+import { createCursorAdapter } from '../agents/adapter-factory.js';
+import { runWithAdapter } from '../agents/runner.js';
+import type { CLIAdapter } from '../agents/types.js';
 import { agentRepo, messageRepo, observationRepo } from '../db/repos.js';
 import { runCoachOnce } from './coach.js';
 
@@ -82,10 +83,10 @@ export async function runEvaluatorOnce(
   db: Database,
   logger: EvaluatorLogger = consoleLog,
 ): Promise<EvaluatorRunSummary> {
-  const adapter = new CursorAdapter();
+  const adapter = createCursorAdapter();
   const install = await adapter.checkInstallation();
   if (!install.installed) {
-    logger.info('[evaluator] cursor-agent not installed; skipping');
+    logger.info(`[evaluator] ${adapter.name} not available; skipping`);
     return { agents_evaluated: 0, observations_created: 0, skipped: [] };
   }
 
@@ -139,13 +140,16 @@ interface EvaluatorObservation {
 }
 
 async function evaluateAgent(
-  adapter: CursorAdapter,
+  adapter: CLIAdapter,
   agent: Agent,
   msgs: ChatMessage[],
 ): Promise<EvaluatorObservation[]> {
   const prompt = buildEvaluatorPrompt(agent, msgs);
-  const spec = adapter.buildCommand({ prompt, permissive: false });
-  const result = await runCLI(adapter, spec, { timeoutMs: EVALUATOR_TIMEOUT_MS });
+  const result = await runWithAdapter(
+    adapter,
+    { prompt, permissive: false },
+    { timeoutMs: EVALUATOR_TIMEOUT_MS },
+  );
   if (result.timedOut || result.aborted) {
     throw new Error(result.timedOut ? 'evaluator timed out' : 'evaluator aborted');
   }

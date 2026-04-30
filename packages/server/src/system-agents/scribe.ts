@@ -29,8 +29,8 @@ import type {
   Lesson,
   LessonKind,
 } from '@slark/shared';
-import { CursorAdapter } from '../agents/cursor-adapter.js';
-import { runCLI } from '../agents/runner.js';
+import { createCursorAdapter } from '../agents/adapter-factory.js';
+import { runWithAdapter } from '../agents/runner.js';
 import { decisionRepo, lessonRepo } from '../db/repos.js';
 import type { Database } from 'better-sqlite3';
 
@@ -73,11 +73,11 @@ export interface ScribeOutput {
  * Caller（runner / route）负责把结果写入 decisions / lessons 表（review_status='pending'）。
  */
 export async function runScribe(input: ScribeInput): Promise<ScribeOutput> {
-  const adapter = new CursorAdapter();
+  const adapter = createCursorAdapter();
   const install = await adapter.checkInstallation();
   if (!install.installed) {
     return emptyOutput(
-      `cursor-agent not installed${install.error ? `: ${install.error}` : ''}`,
+      `${adapter.name} not available${install.error ? `: ${install.error}` : ''}`,
     );
   }
 
@@ -86,12 +86,13 @@ export async function runScribe(input: ScribeInput): Promise<ScribeOutput> {
   }
 
   const prompt = buildScribePrompt(input);
-  const spec = adapter.buildCommand({ prompt, permissive: false });
 
   try {
-    const result = await runCLI(adapter, spec, {
-      timeoutMs: SCRIBE_TIMEOUT_MS,
-    });
+    const result = await runWithAdapter(
+      adapter,
+      { prompt, permissive: false },
+      { timeoutMs: SCRIBE_TIMEOUT_MS },
+    );
     if (result.timedOut) return emptyOutput('Scribe spawn timed out');
     if (result.aborted) return emptyOutput('Scribe spawn aborted');
     if (result.events.some((e) => e.type === 'error')) {

@@ -4,7 +4,7 @@
 > 询问"当前进展到哪了 / 下一步做什么 / 还有什么阻塞"时，只看这一份。
 > 其他文档（PLAN.md / product-brief.md / technical-decisions.md）不维护状态，只维护内容。
 
-**最近更新**：2026-04-30
+**最近更新**：2026-04-30（Sprint 4-ext / Cursor SDK Adapter 落地）
 
 ---
 
@@ -12,11 +12,24 @@
 
 | 项 | 值 |
 |---|---|
-| 当前 Sprint | **MVP 完成（Sprint 1~7 全部交付）** |
+| 当前 Sprint | **MVP 完成（Sprint 1~7 全部交付）+ Sprint 4-ext（Cursor SDK 适配）** |
 | 下一阶段 | Sprint 8+ 远期路线（无强制时间表） |
-| 最近 Sprint | Sprint 7 — Team-First-Collaborative Workflow Design（✅ 已交付，见 [`sprint7-milestone.md`](sprint7-milestone.md)） |
+| 最近 Sprint | Sprint 4-ext — Cursor SDK Adapter 旁路（✅ 已落地 S-1/S-2/S-3，见 [`cursorsdkadapter.md`](cursorsdkadapter.md)） |
 | 当前分支 | `main` |
-| 类型检查 | ✅ pnpm typecheck 通过 |
+| 类型检查 | ✅ pnpm typecheck 通过；smoke verify 通过 |
+
+### Sprint 4-ext 已交付摘要（2026-04-30）
+
+基于 [`cursorsdkadapter.md`](cursorsdkadapter.md) §S-N 优先级，落地 🔴 短期 3 项：
+
+- ✅ **S-1** `CursorSdkAdapter` 旁路：`packages/server/src/agents/cursor-sdk-adapter.ts` + `adapter-factory.ts`，环境变量 `SLARK_CURSOR_BACKEND=sdk\|cli` 切换；`CLIAdapter` 接口扩展 `runDirect?` 钩子；`runner.ts` 新增 `runWithAdapter()` 统一 dispatcher（spawn-派 / api-direct-派）
+- ✅ **S-2** SDK 标准 tool_call schema：`SDKToolUseMessage` 直接给 `{ name, args, result, status, truncated }`，避免 cursor-agent 的 `xxxToolCall` 后缀脆弱解析
+- ✅ **S-3** `summarizeToolArgs`：`packages/server/src/agents/summarize-tool-args.ts` + 接入 `activity-recorder.ts`，给 D-3 Activity Tab 输出 `Shell: ls -la /path` / `Read: src/auth/oauth.ts (offset=10, limit=50)` 风格摘要
+- ✅ 全部 6 个 System Agent（Team Architect / Scribe / Coach / Evaluator / Onboarder / Facilitator）+ Engine 切到 `runWithAdapter`，让 backend 切换贯通整条调用链
+- ✅ `CursorSdkAdapter` 用 lazy dynamic import：默认 `cli` 模式启动**不会触发 SDK / sqlite3 加载**，向后兼容
+- ✅ Smoke verify 脚本：`packages/server/scripts/verify-sdk-adapter.ts`（无需 SQLite 即可跑）
+
+> 关键点：默认行为 100% 不变（`cli` 模式 = 旧 `CursorAdapter` spawn `cursor-agent`）；启用 SDK 模式需要 `CURSOR_API_KEY` + `pnpm approve-builds` 编译 sqlite3。详见 [`cursorsdkadapter.md` §9 运维章节](cursorsdkadapter.md)。
 
 ### Sprint 7 已交付摘要
 
