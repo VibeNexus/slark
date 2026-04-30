@@ -28,6 +28,32 @@ import { runCLI } from './runner.js';
 import { CursorAdapter } from './cursor-adapter.js';
 import type { CLIAdapter, CLIEvent } from './types.js';
 
+// Sprint 3 CP3：活跃 agent_runs 的 AbortController，支持 /abort 与 workflow override 时
+// kill 正在跑的 cursor-agent 进程。key = agent_runs.id（数据库自增）。
+const activeAborters = new Map<number, AbortController>();
+
+/** 中止指定 agent_run。返回是否真的有正在跑的进程被发了 abort 信号。 */
+export function abortAgentRun(agentRunId: number): boolean {
+  const aborter = activeAborters.get(agentRunId);
+  if (!aborter) return false;
+  try {
+    aborter.abort();
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
+/** 中止某 channel 内所有活跃 agent_runs，返回成功发出 abort 的 run 数。 */
+export function abortChannelAgentRuns(db: Database, channelId: string): number {
+  const runs = agentRunRepo.listActiveInChannel(db, channelId);
+  let count = 0;
+  for (const r of runs) {
+    if (abortAgentRun(r.id)) count += 1;
+  }
+  return count;
+}
+
 // Runtime 注册表：MVP 只实装 cursor
 const ADAPTERS: Partial<Record<Runtime, () => CLIAdapter>> = {
   cursor: () => new CursorAdapter(),
@@ -188,6 +214,10 @@ export async function triggerAgent(
   let streamedChars = 0;
   let hasSwitchedToWorking = false;
 
+  // CP3：注册 abort controller，给 abortAgentRun / abortChannelAgentRuns 用
+  const aborter = new AbortController();
+  activeAborters.set(run.id, aborter);
+
   const runResult = await concurrencyQueue.run(() =>
     runCLI(
       adapter,
@@ -200,6 +230,7 @@ export async function triggerAgent(
         permissive: true,
       }),
       {
+        signal: aborter.signal,
         onEvent: (event: CLIEvent) => {
           activity.recordEvent(event);
 
@@ -239,6 +270,9 @@ export async function triggerAgent(
       },
     ),
   );
+
+  // 进程已退出（正常或被 abort），可以解除注册
+  activeAborters.delete(run.id);
 
   // 6. 队列满
   if (!runResult.ok) {

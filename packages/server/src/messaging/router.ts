@@ -34,6 +34,7 @@ import { parseMentions } from './mentions.js';
 import {
   abortWorkflowRun,
   advanceWithUserAction,
+  overrideWorkflowRun,
   startWorkflowRun,
 } from '../workflows/runner.js';
 
@@ -272,7 +273,13 @@ async function safeTriggerChain(
 // =============================================================================
 
 const COMMAND_RE = /^\/([a-z][a-z0-9-]*)(?:\s+([\s\S]*))?$/;
-const CONTROL_COMMANDS = new Set(['/approve', '/reject', '/abort']);
+const CONTROL_COMMANDS = new Set([
+  '/approve',
+  '/reject',
+  '/abort',
+  '/comment',
+  '/override',
+]);
 
 interface ParsedCommand {
   /** 含前导斜杠，如 "/new-feature" */
@@ -348,6 +355,21 @@ async function handleControlCommand(input: {
 }): Promise<boolean> {
   const { db, logger, channelId, threadId, cmd } = input;
 
+  // /comment 只是留批注；不依赖活跃 workflow run
+  if (cmd.name === '/comment') {
+    if (!cmd.args) {
+      emitInfoMessage(
+        db,
+        channelId,
+        threadId ?? null,
+        'ℹ /comment expects a message, e.g. "/comment please double-check the migration".',
+      );
+      return true;
+    }
+    emitInfoMessage(db, channelId, threadId ?? null, `💬 ${cmd.args}`);
+    return true;
+  }
+
   if (!threadId) {
     emitInfoMessage(db, channelId, null, `ℹ ${cmd.name} only works inside a workflow thread.`);
     return true;
@@ -380,6 +402,24 @@ async function handleControlCommand(input: {
     } catch (e) {
       logger.error(`[router] advance failed: ${(e as Error).message}`);
       emitInfoMessage(db, channelId, threadId, `⚠ ${cmd.name} failed: ${(e as Error).message}`);
+    }
+    return true;
+  }
+
+  if (cmd.name === '/override') {
+    try {
+      const res = await overrideWorkflowRun(db, run.id, cmd.args || undefined, logger);
+      if (!res.ok) {
+        emitInfoMessage(
+          db,
+          channelId,
+          threadId,
+          `ℹ /override: ${res.reason ?? 'not allowed'}`,
+        );
+      }
+    } catch (e) {
+      logger.error(`[router] override failed: ${(e as Error).message}`);
+      emitInfoMessage(db, channelId, threadId, `⚠ /override failed: ${(e as Error).message}`);
     }
     return true;
   }

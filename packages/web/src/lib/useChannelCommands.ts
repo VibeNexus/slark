@@ -33,8 +33,17 @@ export function useChannelCommands(
         name: '/reject',
         description: 'Reject current step (with optional reason)',
       });
+      hints.push({
+        name: '/override',
+        description: 'Skip current approval step (with optional reason)',
+      });
       hints.push({ name: '/abort', description: 'Abort the workflow run' });
     }
+    // /comment 在 thread 与主线均可用
+    hints.push({
+      name: '/comment',
+      description: 'Add a side note (no workflow effect)',
+    });
     return hints;
   }, [channelId, channels, workflowsByProject, inThread]);
 }

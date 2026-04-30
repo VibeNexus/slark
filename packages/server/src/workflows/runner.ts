@@ -37,7 +37,7 @@ import {
   workflowRunRepo,
 } from '../db/repos.js';
 import { hub } from '../ws/hub.js';
-import { triggerAgent } from '../agents/engine.js';
+import { abortChannelAgentRuns, triggerAgent } from '../agents/engine.js';
 import { parseAgentMention, parseWorkflowYaml } from './yaml-parser.js';
 
 interface RunnerLogger {
@@ -227,6 +227,9 @@ export async function advanceWithUserAction(
 /**
  * 用户 /abort 或 REST POST .../abort。
  * 已 ended 的 run 不再生效（idempotent）。
+ *
+ * Sprint 3 CP3：除标 status='aborted' 外，会调 abortChannelAgentRuns()
+ * 把 channel 内活跃的 cursor-agent 子进程 kill 掉（清掉 Sprint 2 TD-7）。
  */
 export function abortWorkflowRun(
   db: Database,
@@ -237,17 +240,23 @@ export function abortWorkflowRun(
   if (!run) throw new Error(`workflow run ${runId} not found`);
   if (run.status !== 'running' && run.status !== 'awaiting_approval') return;
 
+  // 1. 先标 status，让 executeStep 的 stale 检查跳过任何 in-flight 推进
   const state = parseState(run.state_json);
   state.abort_reason = reason;
-
   workflowRunRepo.update(db, runId, {
     status: 'aborted',
     state_json: JSON.stringify(state),
     ended: true,
   });
 
+  // 2. kill 该 channel 内活跃的 agent_runs（实际终止 cursor-agent 进程）
+  const killed = abortChannelAgentRuns(db, run.channel_id);
+
   emitSystemMessage(db, run, run.thread_id, {
-    content: `⛔ Workflow aborted — ${reason}`,
+    content:
+      killed > 0
+        ? `⛔ Workflow aborted — ${reason} (killed ${killed} active agent run${killed === 1 ? '' : 's'})`
+        : `⛔ Workflow aborted — ${reason}`,
     metadata: {
       system_event: {
         type: 'workflow_finished',
@@ -264,6 +273,41 @@ export function abortWorkflowRun(
   });
 
   broadcastRunUpdate(db, runId);
+}
+
+/**
+ * 用户 /override [reason]：跳过当前 step。
+ *
+ * 当前实现：
+ *   - awaiting_approval：等同 /approve，并把 reason 标记到 state（[override] 前缀）
+ *   - running：拒绝（提示用户先 /abort 或等 step 自然完成）
+ *
+ * running 状态下的 override 涉及 kill agent + 跳 next step 的精细同步，会在
+ * Sprint 3 后续或独立 CP 评估扩展。
+ */
+export async function overrideWorkflowRun(
+  db: Database,
+  runId: number,
+  reason: string | undefined,
+  logger: RunnerLogger = consoleLog,
+): Promise<{ ok: boolean; run: WorkflowRun | null; reason?: string }> {
+  const run = workflowRunRepo.getById(db, runId);
+  if (!run) throw new Error(`workflow run ${runId} not found`);
+  if (run.status !== 'running' && run.status !== 'awaiting_approval') {
+    return { ok: false, run, reason: `run is ${run.status}, not active` };
+  }
+  if (run.status === 'running') {
+    return {
+      ok: false,
+      run,
+      reason:
+        '/override only works while awaiting approval; use /abort to cancel a running step.',
+    };
+  }
+  // awaiting_approval → 等同 approve，但备注 override
+  const overrideNote = `[override] ${reason ?? ''}`.trim();
+  const next = await advanceWithUserAction(db, runId, 'approve', overrideNote, logger);
+  return { ok: true, run: next };
 }
 
 // =============================================================================

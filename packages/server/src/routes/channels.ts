@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Database } from 'better-sqlite3';
 import { channelRepo, agentRepo, messageRepo } from '../db/repos.js';
+import { abortChannelAgentRuns } from '../agents/engine.js';
 
 export async function channelRoutes(app: FastifyInstance, db: Database): Promise<void> {
   // 列出频道；可选 ?project_id= 过滤
@@ -102,12 +103,11 @@ export async function channelRoutes(app: FastifyInstance, db: Database): Promise
     reply.code(204);
   });
 
-  // Stop all agents in channel
-  // CP8.3：agents.status 已废除；本端点暂时只返回 channel 内 agent 数量。
-  // TODO Sprint 2 Workflow Runner：实际 kill 该 channel 内活跃的 agent_runs（agentRunRepo.listActiveInChannel + CLIRunner.abort）。
+  // Stop all agents in channel — Sprint 3 CP3 起真正 kill 活跃的 cursor-agent 进程
+  // (清掉 Sprint 2 TD-7 的子需求)
   app.post('/api/channels/:id/stop-all', async (req) => {
     const { id } = req.params as { id: string };
-    const agents = agentRepo.listInChannel(db, id);
-    return { stopped: agents.length };
+    const killed = abortChannelAgentRuns(db, id);
+    return { stopped: killed };
   });
 }
