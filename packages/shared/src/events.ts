@@ -1,8 +1,14 @@
 /**
- * WebSocket 消息协议（对齐 PLAN.md MVP-3）
+ * WebSocket 消息协议（对齐 PLAN.md MVP-3 + Sprint 2 CP4）
  */
 
-import type { ChatMessage, MessageMetadata, Task } from './types.js';
+import type {
+  ChatMessage,
+  MessageMetadata,
+  Task,
+  WorkflowRun,
+  WorkflowRunStatus,
+} from './types.js';
 import type { AgentStatus, TaskStatus } from './constants.js';
 
 // =============================================================================
@@ -48,6 +54,11 @@ export type ServerEvent =
     }
   | { type: 'system_event'; event: SystemEvent }
   | { type: 'task_update'; task: Task }
+  | {
+      /** Sprint 2 CP4：workflow run 状态变化（启动/推进/awaiting/完成/中止/失败） */
+      type: 'workflow_run_update';
+      run: WorkflowRun;
+    }
   | { type: 'subscribed'; channel_id: string }
   | { type: 'pong' }
   | { type: 'error'; code: string; message: string };
@@ -67,4 +78,30 @@ export type SystemEvent =
       by: string;
     }
   | { type: 'agent_error'; channel_id: string; agent: string; message: string }
-  | { type: 'chain_limit_reached'; channel_id: string; detail: string };
+  | { type: 'chain_limit_reached'; channel_id: string; detail: string }
+  /** Sprint 2 CP3 / CP4：workflow 阶段性事件（嵌入到 system 消息 metadata 用于前端识别） */
+  | {
+      type: 'workflow_started';
+      channel_id: string;
+      run_id: number;
+      workflow_name: string;
+    }
+  | {
+      type: 'workflow_step';
+      channel_id: string;
+      run_id: number;
+      step_id: string;
+      owner: string;
+    }
+  | {
+      type: 'workflow_awaiting_approval';
+      channel_id: string;
+      run_id: number;
+      step_id: string;
+    }
+  | {
+      type: 'workflow_finished';
+      channel_id: string;
+      run_id: number;
+      status: WorkflowRunStatus;
+    };

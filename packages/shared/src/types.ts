@@ -143,6 +143,15 @@ export interface MessageMetadata {
     output_tokens_estimate?: number;
   };
 
+  /** Sprint 2 CP3：标记此 system / agent 消息属于哪个 workflow run / step */
+  workflow_ref?: {
+    run_id: number;
+    workflow_id: string;
+    step_id: string;
+    /** 'header' = 步骤起始 system 消息 / 'output' = agent 完成此 step 的回复 */
+    kind?: 'header' | 'output' | 'await_approval' | 'finished';
+  };
+
   /** System 消息事件类型（sender_type=system） */
   system_event?:
     | { type: 'task_created'; task_id: number; title: string }
@@ -155,7 +164,15 @@ export interface MessageMetadata {
         by: string;
       }
     | { type: 'agent_error'; agent: string; message: string }
-    | { type: 'chain_limit_reached'; detail: string };
+    | { type: 'chain_limit_reached'; detail: string }
+    | { type: 'workflow_started'; run_id: number; workflow_name: string }
+    | { type: 'workflow_step'; run_id: number; step_id: string; owner: string }
+    | { type: 'workflow_awaiting_approval'; run_id: number; step_id: string }
+    | {
+        type: 'workflow_finished';
+        run_id: number;
+        status: 'completed' | 'aborted' | 'failed';
+      };
 }
 
 // =============================================================================

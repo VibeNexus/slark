@@ -20,10 +20,22 @@ import {
   MAX_CHAIN_DEPTH,
   MAX_MENTIONS_PER_MESSAGE,
 } from '@slark/shared';
-import { agentRepo, messageRepo, taskRepo } from '../db/repos.js';
+import {
+  agentRepo,
+  channelRepo,
+  messageRepo,
+  taskRepo,
+  workflowRepo,
+  workflowRunRepo,
+} from '../db/repos.js';
 import { hub } from '../ws/hub.js';
 import { triggerAgent } from '../agents/engine.js';
 import { parseMentions } from './mentions.js';
+import {
+  abortWorkflowRun,
+  advanceWithUserAction,
+  startWorkflowRun,
+} from '../workflows/runner.js';
 
 export interface MessageRouterDeps {
   db: Database;
@@ -76,6 +88,25 @@ export async function routeUserMessage(
     parent_id: threadId ?? null,
   });
 
+  // Sprint 2 CP4：先广播用户消息再做 command/workflow 处理，确保 UI 顺序对齐
+  hub.broadcast(channelId, { type: 'message', message: userMsg });
+
+  // 2a. 命令分发（/command）
+  const cmd = parseCommand(content);
+  if (cmd) {
+    const handled = await handleCommand({
+      db,
+      logger,
+      channelId,
+      threadId,
+      userMsg,
+      cmd,
+    });
+    if (handled) return;
+  }
+  // 重新发一次 user msg 太蠢；上面已经广播过；这里重新走 task / mention 流程 —
+  // 不再 broadcast 第二次。下面段落删除原来的 broadcast 调用。
+
   // 2b. 如果 as_task=true，基于此消息建一个 task
   if (asTask) {
     const title = content.replace(/\s+/g, ' ').trim().slice(0, 200);
@@ -108,8 +139,7 @@ export async function routeUserMessage(
     hub.broadcast(channelId, { type: 'task_update', task });
   }
 
-  // 3. 广播
-  hub.broadcast(channelId, { type: 'message', message: userMsg });
+  // 3. user msg 已在 step 2 末尾广播；继续触发 @mention agents
 
   // 4. 触发被 @mention 的 agents（并发）
   if (mentionsInChannel.length === 0) {
@@ -235,6 +265,153 @@ async function safeTriggerChain(
         ),
       ),
   );
+}
+
+// =============================================================================
+// Command parsing & dispatch (Sprint 2 CP3 / CP4)
+// =============================================================================
+
+const COMMAND_RE = /^\/([a-z][a-z0-9-]*)(?:\s+([\s\S]*))?$/;
+const CONTROL_COMMANDS = new Set(['/approve', '/reject', '/abort']);
+
+interface ParsedCommand {
+  /** 含前导斜杠，如 "/new-feature" */
+  name: string;
+  /** 命令尾巴去掉 cmd 后的内容，可能为空字符串 */
+  args: string;
+}
+
+export function parseCommand(content: string): ParsedCommand | null {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith('/')) return null;
+  const m = COMMAND_RE.exec(trimmed);
+  if (!m) return null;
+  return {
+    name: `/${m[1]}`,
+    args: (m[2] ?? '').trim(),
+  };
+}
+
+/**
+ * 处理 / 开头的命令；返回 true 表示已处理（caller 跳过默认 mention 流程）。
+ *
+ * 支持：
+ *   - 控制命令 /approve /reject /abort：作用于当前 thread 内的活跃 workflow_run
+ *   - 自定义 trigger：匹配 workflows.trigger_command → startWorkflowRun
+ */
+async function handleCommand(input: {
+  db: Database;
+  logger: MessageRouterDeps['logger'];
+  channelId: string;
+  threadId?: string;
+  userMsg: ChatMessage;
+  cmd: ParsedCommand;
+}): Promise<boolean> {
+  const { db, logger, channelId, threadId, userMsg, cmd } = input;
+
+  if (CONTROL_COMMANDS.has(cmd.name)) {
+    return handleControlCommand({ db, logger, channelId, threadId, cmd });
+  }
+
+  // 普通命令 → 看是否匹配 workflow trigger
+  const channel = channelRepo.getById(db, channelId);
+  if (!channel?.project_id) return false;
+  const wf = workflowRepo.getByTrigger(db, channel.project_id, cmd.name);
+  if (!wf) return false;
+
+  try {
+    await startWorkflowRun(
+      db,
+      {
+        workflow_id: wf.id,
+        channel_id: channelId,
+        started_by: LOCAL_USER_ID,
+        trigger_message_id: userMsg.id,
+        initial_input: cmd.args || undefined,
+      },
+      logger,
+    );
+  } catch (e) {
+    const msg = (e as Error).message;
+    logger.error(`[router] failed to start workflow ${wf.name}: ${msg}`);
+    emitInfoMessage(db, channelId, threadId ?? null, `⚠ Failed to start workflow: ${msg}`);
+  }
+  return true;
+}
+
+async function handleControlCommand(input: {
+  db: Database;
+  logger: MessageRouterDeps['logger'];
+  channelId: string;
+  threadId?: string;
+  cmd: ParsedCommand;
+}): Promise<boolean> {
+  const { db, logger, channelId, threadId, cmd } = input;
+
+  if (!threadId) {
+    emitInfoMessage(db, channelId, null, `ℹ ${cmd.name} only works inside a workflow thread.`);
+    return true;
+  }
+
+  const run = workflowRunRepo.getActive(db, channelId, threadId);
+  if (!run) {
+    emitInfoMessage(db, channelId, threadId, 'ℹ No active workflow in this thread.');
+    return true;
+  }
+
+  if (cmd.name === '/approve' || cmd.name === '/reject') {
+    if (run.status !== 'awaiting_approval') {
+      emitInfoMessage(
+        db,
+        channelId,
+        threadId,
+        `ℹ Workflow is currently "${run.status}", not awaiting approval.`,
+      );
+      return true;
+    }
+    try {
+      await advanceWithUserAction(
+        db,
+        run.id,
+        cmd.name === '/approve' ? 'approve' : 'reject',
+        cmd.name === '/reject' ? cmd.args || undefined : undefined,
+        logger,
+      );
+    } catch (e) {
+      logger.error(`[router] advance failed: ${(e as Error).message}`);
+      emitInfoMessage(db, channelId, threadId, `⚠ ${cmd.name} failed: ${(e as Error).message}`);
+    }
+    return true;
+  }
+
+  if (cmd.name === '/abort') {
+    try {
+      abortWorkflowRun(db, run.id, cmd.args || 'aborted by user');
+    } catch (e) {
+      logger.error(`[router] abort failed: ${(e as Error).message}`);
+      emitInfoMessage(db, channelId, threadId, `⚠ /abort failed: ${(e as Error).message}`);
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function emitInfoMessage(
+  db: Database,
+  channelId: string,
+  parentId: string | null,
+  content: string,
+): void {
+  const sysMsg = messageRepo.create(db, {
+    channel_id: channelId,
+    sender_type: 'system',
+    sender_id: LOCAL_USER_ID,
+    content,
+    metadata: null,
+    parent_id: parentId,
+  });
+  hub.broadcast(channelId, { type: 'message', message: sysMsg });
 }
 
 async function resolveMentionsToAgents(

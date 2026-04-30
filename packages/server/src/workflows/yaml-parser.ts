@@ -127,6 +127,13 @@ export function parseWorkflowYaml(yamlText: string): WorkflowDefinition {
         );
       }
     }
+    // owner='local-user' 仅在 approve_or_reject 步骤合法（Sprint 2 范围）
+    if (s.owner === 'local-user' && s.action !== 'approve_or_reject') {
+      throw new WorkflowYamlError(
+        `step "${s.id}" owner is "local-user" but action != approve_or_reject; ` +
+          'Sprint 2 only supports local-user for approval steps.',
+      );
+    }
     for (const ref of [s.on_complete, s.on_approve, s.on_reject, s.input]) {
       if (ref && !ids.has(ref)) {
         throw new WorkflowYamlError(`step "${s.id}" references unknown step "${ref}"`);
