@@ -59,6 +59,9 @@ export const COACH_NEGATIVE_THRESHOLD = 3;
 /** Onboarder spawn 超时 */
 export const ONBOARDER_TIMEOUT_MS = 60_000;
 
+/** Facilitator spawn 超时（多角色推演，给 90s）*/
+export const FACILITATOR_TIMEOUT_MS = 90_000;
+
 // =============================================================================
 // 端口与数据目录（D-10）
 // =============================================================================
