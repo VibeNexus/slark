@@ -13,8 +13,10 @@ import { getChannelMessages } from '../lib/api';
 import { useMessagesStore } from '../stores/messages';
 import { useAgentsStore } from '../stores/agents';
 import { wsClient } from '../lib/ws';
+import { useChannelCommands } from '../lib/useChannelCommands';
 import { Message } from './Message';
 import { MessageInput } from './MessageInput';
+import { WorkflowProgress } from './WorkflowProgress';
 
 interface Props {
   channelId: string;
@@ -104,6 +106,9 @@ export function ThreadPanel({ channelId }: Props) {
     });
   };
 
+  // Hooks must be called unconditionally (before early returns)
+  const threadCommands = useChannelCommands(channelId, true);
+
   if (!threadId) return null;
 
   const rootAgent = rootMessage?.sender_id ? agentsById.get(rootMessage.sender_id) : undefined;
@@ -134,6 +139,8 @@ export function ThreadPanel({ channelId }: Props) {
           </svg>
         </button>
       </header>
+
+      <WorkflowProgress channelId={channelId} threadId={threadId} />
 
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {rootMessage ? (
@@ -168,6 +175,7 @@ export function ThreadPanel({ channelId }: Props) {
         placeholder="Message thread"
         showAsTask={false}
         onSend={send}
+        commands={threadCommands}
       />
     </aside>
   );

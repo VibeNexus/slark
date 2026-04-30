@@ -14,6 +14,8 @@ import type {
   TeamSuggestion,
   ReasoningEffort,
   Runtime,
+  Workflow,
+  WorkflowRun,
 } from '@slark/shared';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -198,3 +200,60 @@ export const isMessageSaved = (id: string) =>
   request<{ saved: boolean }>(`/api/messages/${id}/saved`);
 
 export const listSaved = () => request<ChatMessage[]>('/api/saved');
+
+// Workflows (Sprint 2 CP1)
+export const listProjectWorkflows = (projectId: string) =>
+  request<Workflow[]>(`/api/projects/${projectId}/workflows`);
+
+export const getWorkflow = (id: string) =>
+  request<Workflow>(`/api/workflows/${id}`);
+
+export const createWorkflow = (
+  projectId: string,
+  data: {
+    name: string;
+    description?: string | null;
+    trigger_command: string;
+    definition_yaml: string;
+  },
+) =>
+  request<Workflow>(`/api/projects/${projectId}/workflows`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+
+export const updateWorkflow = (
+  id: string,
+  patch: Partial<{
+    name: string;
+    description: string | null;
+    trigger_command: string;
+    definition_yaml: string;
+  }>,
+) =>
+  request<Workflow>(`/api/workflows/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+
+export const deleteWorkflow = (id: string) =>
+  request<void>(`/api/workflows/${id}`, { method: 'DELETE' });
+
+export const listWorkflowRuns = (workflowId: string) =>
+  request<WorkflowRun[]>(`/api/workflows/${workflowId}/runs`);
+
+export const getWorkflowRun = (id: number) =>
+  request<WorkflowRun & { workflow: Workflow | null }>(`/api/workflow-runs/${id}`);
+
+export const abortWorkflowRun = (id: number, reason?: string) =>
+  request<WorkflowRun>(`/api/workflow-runs/${id}/abort`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: reason ?? 'aborted by user' }),
+  });
+
+export const getActiveWorkflowRun = (channelId: string, threadId?: string) => {
+  const qs = threadId ? `?thread_id=${encodeURIComponent(threadId)}` : '';
+  return request<{ run: (WorkflowRun & { workflow: Workflow | null }) | null }>(
+    `/api/channels/${channelId}/active-workflow-run${qs}`,
+  );
+};

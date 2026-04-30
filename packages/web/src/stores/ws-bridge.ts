@@ -6,6 +6,7 @@ import type { ServerEvent } from '@slark/shared';
 import { wsClient } from '../lib/ws';
 import { useAgentsStore } from './agents';
 import { useMessagesStore } from './messages';
+import { useWorkflowsStore } from './workflows';
 
 let initialized = false;
 
@@ -26,6 +27,11 @@ export function initWSBridge(): void {
           .getState()
           .finalizeMessage(event.message_id, event.final_content, event.metadata);
         break;
+      case 'workflow_run_update': {
+        // CP4：runner 推进或终止时同步进度条
+        useWorkflowsStore.getState().upsertRun(event.run);
+        break;
+      }
       case 'agent_status': {
         // CP8.3：状态完全由 agent_runs 派生（per-channel）。
         // - thinking/working/error/stopped：写入 per-channel map

@@ -8,6 +8,7 @@ import { useMessagesStore } from '../stores/messages';
 import { wsClient } from '../lib/ws';
 import { stopAllAgents } from '../lib/api';
 import { projectChannelPath, projectIndexPath } from '../lib/routes';
+import { useChannelCommands } from '../lib/useChannelCommands';
 import { ChannelHeader } from '../components/ChannelHeader';
 import { MessageList } from '../components/MessageList';
 import { MessageInput } from '../components/MessageInput';
@@ -118,6 +119,8 @@ export function ChannelPage() {
     setParams(next);
   };
 
+  const channelCommands = useChannelCommands(channelId, false);
+
   return (
     <div className="flex-1 flex min-w-0 min-h-0">
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
@@ -142,6 +145,7 @@ export function ChannelPage() {
             <MessageInput
               placeholder={`Message #${channel.name}`}
               onSend={send}
+              commands={channelCommands}
             />
           </>
         )}

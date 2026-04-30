@@ -3,6 +3,7 @@ import { useMatch } from 'react-router-dom';
 import { useChannelsStore } from '../stores/channels';
 import { useAgentsStore } from '../stores/agents';
 import { useProjectsStore } from '../stores/projects';
+import { useWorkflowsStore } from '../stores/workflows';
 import { Sidebar } from './Sidebar';
 import { CreateAgentDialog } from './CreateAgentDialog';
 import { CreateChannelDialog } from './CreateChannelDialog';
@@ -48,6 +49,14 @@ export function Layout({ children }: Props) {
   // currentProjectId 为 null 时显示所有（兼容 v0 遗留数据 / 无 Project 首次启动）
   const currentProject =
     projects.find((p) => p.id === currentProjectId) ?? null;
+
+  // CP4：切换 Project 时拉一次 workflows 列表（用于 /command 提示）
+  const fetchWorkflows = useWorkflowsStore((s) => s.fetchProjectWorkflows);
+  useEffect(() => {
+    if (currentProject) {
+      void fetchWorkflows(currentProject.id);
+    }
+  }, [currentProject, fetchWorkflows]);
 
   const visibleChannels = useMemo(() => {
     if (!currentProject) return channels;
