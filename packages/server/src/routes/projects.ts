@@ -20,6 +20,7 @@ import type { Database } from 'better-sqlite3';
 import { GOAL_MAX_LENGTH } from '@slark/shared';
 import { projectRepo } from '../db/repos.js';
 import { suggestTeam } from '../system-agents/team-architect.js';
+import { importBuiltinsForProject } from '../workflows/builtin-import.js';
 
 const NAME_SLUG_RE = /^[a-z0-9_-]+$/;
 
@@ -102,6 +103,21 @@ export async function projectRoutes(app: FastifyInstance, db: Database): Promise
       team_rules: body.team_rules ?? null,
       color: body.color ?? null,
     });
+
+    // CP2：自动 seed 内置 workflow 模板（feature-development / bug-fix / research）
+    try {
+      const importRes = importBuiltinsForProject(db, project.id);
+      req.log.info(
+        { project_id: project.id, ...importRes },
+        '[workflows] builtin templates imported',
+      );
+    } catch (e) {
+      req.log.warn(
+        { err: e, project_id: project.id },
+        '[workflows] failed to import builtin templates',
+      );
+    }
+
     reply.code(201);
     return project;
   });

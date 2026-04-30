@@ -14,7 +14,8 @@ import websocket from '@fastify/websocket';
 import { config } from './config.js';
 import { getDb, closeDb } from './db/index.js';
 import { runSeed } from './db/seed.js';
-import { channelRepo, agentRepo } from './db/repos.js';
+import { channelRepo, agentRepo, projectRepo } from './db/repos.js';
+import { importBuiltinsForProject } from './workflows/builtin-import.js';
 import { channelRoutes } from './routes/channels.js';
 import { agentRoutes } from './routes/agents.js';
 import { taskRoutes } from './routes/tasks.js';
@@ -45,6 +46,23 @@ async function main() {
     info: (m) => app.log.info(m),
     warn: (m) => app.log.warn(m),
   });
+
+  // Sprint 2 CP2：给已存在的 Project 补齐 builtin workflow 模板（已存在的跳过）
+  for (const p of projectRepo.list(db)) {
+    const res = importBuiltinsForProject(db, p.id);
+    if (res.imported > 0) {
+      app.log.info(
+        { project: p.name, ...res },
+        '[workflows] builtin templates seeded',
+      );
+    }
+    if (res.errors.length > 0) {
+      app.log.warn(
+        { project: p.name, errors: res.errors },
+        '[workflows] some builtin templates failed to seed',
+      );
+    }
+  }
 
   // REST
   app.get('/api/health', async () => ({
