@@ -43,6 +43,9 @@ export const GOAL_MAX_LENGTH = 500;
 /** Team Architect spawn 超时（独立于 PROCESS_TIMEOUT_MS） */
 export const TEAM_ARCHITECT_TIMEOUT_MS = 30_000;
 
+/** Scribe spawn 超时（thread 体量较大，给 60s）*/
+export const SCRIBE_TIMEOUT_MS = 60_000;
+
 // =============================================================================
 // 端口与数据目录（D-10）
 // =============================================================================

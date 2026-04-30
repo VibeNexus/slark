@@ -141,6 +141,7 @@ Sprint 3 已完成。进入 Sprint 4 — Delivery Loop（Scribe 沉淀）。
 
 - [`docs/clawteam-comparison.md`](clawteam-comparison.md) — ClawTeam 借鉴条目（B-N）
 - [`docs/research/routa-analysis.md`](research/routa-analysis.md) — Routa 借鉴条目
+- [`docs/cursorsdkadapter.md`](cursorsdkadapter.md) — Cursor SDK / cookbook 引入条目（S-N）
 - [`docs/cli-event-format.md`](cli-event-format.md) — CLI 事件格式
 - [`docs/phase0-cli-spike.md`](phase0-cli-spike.md) — Phase 0 验证记录
 - [`docs/ui-reference/`](ui-reference/README.md) — UI 视觉基准
