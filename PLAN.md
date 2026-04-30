@@ -99,8 +99,8 @@ Layer 1:  Goal            项目目标（一等公民，必填）
 | **Sprint 2** — Workflow Framework | Workflow YAML + 3 内置模板 + 执行引擎 | ✅ **已交付**（见 [`docs/sprint2-milestone.md`](docs/sprint2-milestone.md)） |
 | **Sprint 3** — Responsibility + User Intervention | 批准流 + 用户介入 + Workflow Import/Export | ✅ **已交付**（见 [`docs/sprint3-milestone.md`](docs/sprint3-milestone.md)） |
 | **Sprint 4** — Delivery Loop (Scribe) | 沉淀 + Intelligence Tab | ✅ **已交付**（见 [`docs/sprint4-milestone.md`](docs/sprint4-milestone.md)） |
-| **Sprint 5** — Evolution Loop | Evaluator + Coach + Description 演化 | ⏳ **当前焦点** |
-| Sprint 6 — Onboarding Loop + Skill Matrix | 新 Project 自动分析 + 能力地图 | 规划 |
+| **Sprint 5** — Evolution Loop | Evaluator + Coach + Description 演化 | ✅ **已交付**（见 [`docs/sprint5-milestone.md`](docs/sprint5-milestone.md)） |
+| **Sprint 6** — Onboarding Loop + Skill Matrix | 新 Project 自动分析 + 能力地图 | ⏳ **当前焦点** |
 | Sprint 7 — Team-First-Collaborative Workflow Design | Facilitator 主持的 Workflow Design Session | 规划 |
 | Sprint 8+ — 远期路线 | 跨 Project 经验迁移 / 多 runtime / Worktree 隔离 / Marketplace | 远期 |
 
@@ -182,44 +182,15 @@ CP1 ~ CP6 已交付：`decisions` / `lessons` 表（schema_version → 6）+ Scr
 
 ---
 
-## Sprint 5: Evolution Loop（Agent 成长）（当前焦点）
+### Sprint 5：Evolution Loop（Agent 成长）✅
 
-**目标**：Agent description 会随时间演化，团队越用越强。
+CP1 ~ CP6 已交付：`agent_observations` / `agent_feedback` 表（schema_version → 7）+ Evaluator 24h cron + Coach 阈值触发 + Agent Profile FEEDBACK Tab + Apply/Rollback。
 
-**战略价值**：达成 S-6 成功标准 —— "连续使用 3 个月后 Agent 团队交付质量提升"。
-
-**预估工期**：5~7 工作日
-
-### 范围
-
-- [ ] **Evaluator System Agent**（后台定期）
-  - cron：每 24h 一次
-  - 输入：每个 Agent 最近 N 个 task 的产出
-  - 输出：`agent_observations` 表
-- [ ] **Coach System Agent**（提建议）
-  - 触发：Evaluator 发现 ≥3 次同类问题
-  - 输出：`agent_feedback` 表，含建议的 description diff
-- [ ] Agent Profile 新增 **FEEDBACK Tab**
-  - 列出 Coach 历史建议（pending / applied / rejected）
-  - 每个建议带 description 的前后 diff
-  - [Apply] / [Reject] 按钮
-- [ ] Apply 后的回滚机制（保留 diff 历史，可逆）
-
-### 启动前待决
-
-- Q-6：Apply 后能否回滚 → 建议 "能"
-
-### 验收
-
-- [ ] 制造场景：让一个 Agent 连续 3 次回复都漏掉某要素
-- [ ] 24h 后 Agent Profile FEEDBACK Tab 出现 Coach 建议
-- [ ] Apply 后 agents.description 实际更新
-- [ ] 下次 spawn 时新 description 生效
-- [ ] Apply 后能 Rollback 到原版本
+详细 → [`docs/sprint5-milestone.md`](docs/sprint5-milestone.md)。
 
 ---
 
-## Sprint 6: Onboarding Loop + Skill Matrix
+## Sprint 6: Onboarding Loop + Skill Matrix（当前焦点）
 
 **目标**：新 Project 自动生成 onboarding 包；Agent 能力地图自动维护。
 
