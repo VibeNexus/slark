@@ -19,7 +19,15 @@
 import type { Database } from 'better-sqlite3';
 import type { AgentStatus, ChatMessage, MessageMetadata, Runtime } from '@slark/shared';
 import { LOCAL_USER_ID } from '@slark/shared';
-import { agentRepo, agentRunRepo, channelRepo, messageRepo, projectRepo } from '../db/repos.js';
+import {
+  agentRepo,
+  agentRunRepo,
+  channelRepo,
+  decisionRepo,
+  lessonRepo,
+  messageRepo,
+  projectRepo,
+} from '../db/repos.js';
 import { hub } from '../ws/hub.js';
 import { buildContext } from './context-builder.js';
 import { ActivityRecorder } from './activity-recorder.js';
@@ -132,6 +140,9 @@ export async function triggerAgent(
   // 1. 构建上下文
   const channel = channelRepo.getById(db, ctx.channelId);
   const teamAgents = channel ? agentRepo.listInChannel(db, channel.id) : [];
+  const project = channel?.project_id
+    ? projectRepo.getById(db, channel.project_id)
+    : null;
   // 取最近 50 条历史（context-builder 会再按 token 预算裁剪）
   const history = ctx.parentMessageId
     ? messageRepo.listThread(db, ctx.parentMessageId)
@@ -142,12 +153,29 @@ export async function triggerAgent(
     (m) => m.created_at < ctx.triggerMessage.created_at,
   );
 
+  // Sprint 4 CP5：注入 audience 匹配的 lessons + 最新 decisions（仅 approved）
+  const audiences = ['all', 'team', agent.name, agent.id];
+  const lessons = project
+    ? lessonRepo.listForInjection(db, project.id, audiences, 20)
+    : [];
+  const decisions = project
+    ? decisionRepo.listByProject(db, project.id, { review_status: 'approved', limit: 5 })
+    : [];
+
   const built = buildContext({
     targetAgent: agent,
     teamAgents,
     history: historyBeforeTrigger,
     triggerMessage: ctx.triggerMessage,
+    project,
+    lessons,
+    decisions,
   });
+
+  // 标记被注入的 lessons 已被使用（用于 listForInjection 的 ORDER BY use_count）
+  if (lessons.length > 0) {
+    lessonRepo.bumpUseCount(db, lessons.map((l) => l.id));
+  }
 
   log.info(
     `[engine] triggering ${agent.name} (chain_depth=${ctx.chainDepth ?? 0}, ctx=${built.estimatedTokens}t)`,
