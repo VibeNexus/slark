@@ -17,6 +17,7 @@ import { runSeed } from './db/seed.js';
 import { channelRepo, agentRepo, projectRepo, workflowRepo } from './db/repos.js';
 import { importBuiltinsForProject } from './workflows/builtin-import.js';
 import { deriveResponsibilitiesForWorkflow } from './workflows/derive-responsibilities.js';
+import { startEvaluatorScheduler } from './system-agents/evaluator.js';
 import { channelRoutes } from './routes/channels.js';
 import { agentRoutes } from './routes/agents.js';
 import { taskRoutes } from './routes/tasks.js';
@@ -108,6 +109,13 @@ async function main() {
 
   // WebSocket
   registerWSRoute(app, db);
+
+  // Sprint 5 CP2：启动 Evaluator 后台调度（每 24h 一轮）
+  startEvaluatorScheduler(db, {
+    info: (m) => app.log.info(m),
+    warn: (m) => app.log.warn(m),
+    error: (m) => app.log.error(m),
+  });
 
   try {
     await app.listen({ port: config.port, host: config.host });

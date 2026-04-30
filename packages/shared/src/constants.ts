@@ -46,6 +46,16 @@ export const TEAM_ARCHITECT_TIMEOUT_MS = 30_000;
 /** Scribe spawn 超时（thread 体量较大，给 60s）*/
 export const SCRIBE_TIMEOUT_MS = 60_000;
 
+/** Evaluator / Coach spawn 超时 */
+export const EVALUATOR_TIMEOUT_MS = 60_000;
+export const COACH_TIMEOUT_MS = 60_000;
+
+/** Evaluator 默认评估窗口（24h） */
+export const EVALUATOR_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Coach 触发条件：同 tag 至少 N 次 negative observation */
+export const COACH_NEGATIVE_THRESHOLD = 3;
+
 // =============================================================================
 // 端口与数据目录（D-10）
 // =============================================================================
