@@ -13,6 +13,9 @@ import { nanoid } from 'nanoid';
 import type {
   Agent,
   AgentActivity,
+  AgentFeedback,
+  AgentFeedbackStatus,
+  AgentObservation,
   AgentRun,
   AgentRunStatus,
   ActivityType,
@@ -22,6 +25,7 @@ import type {
   Lesson,
   LessonKind,
   MessageMetadata,
+  ObservationPolarity,
   Project,
   Responsibility,
   ResponsibilityAuthority,
@@ -1636,5 +1640,240 @@ export const lessonRepo = {
 
   remove(db: Database, id: number): void {
     db.prepare('DELETE FROM lessons WHERE id = ?').run(id);
+  },
+};
+
+// =============================================================================
+// Agent Observations (Sprint 5 / D-20 Evolution Loop)
+// =============================================================================
+
+interface ObservationRow {
+  id: number;
+  agent_id: string;
+  polarity: string;
+  tag: string;
+  body: string;
+  source_message_id: string | null;
+  source_run_id: number | null;
+  created_at: number;
+}
+
+function rowToObservation(r: ObservationRow): AgentObservation {
+  return {
+    id: r.id,
+    agent_id: r.agent_id,
+    polarity: r.polarity as ObservationPolarity,
+    tag: r.tag,
+    body: r.body,
+    source_message_id: r.source_message_id,
+    source_run_id: r.source_run_id,
+    created_at: r.created_at,
+  };
+}
+
+export const observationRepo = {
+  listByAgent(
+    db: Database,
+    agentId: string,
+    opts?: { since?: number; limit?: number },
+  ): AgentObservation[] {
+    const where: string[] = ['agent_id = ?'];
+    const params: unknown[] = [agentId];
+    if (opts?.since !== undefined) {
+      where.push('created_at >= ?');
+      params.push(opts.since);
+    }
+    const limit = opts?.limit ?? 200;
+    params.push(limit);
+    const rows = db
+      .prepare(
+        `SELECT * FROM agent_observations WHERE ${where.join(' AND ')}
+         ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(...params) as ObservationRow[];
+    return rows.map(rowToObservation);
+  },
+
+  create(
+    db: Database,
+    input: {
+      agent_id: string;
+      polarity: ObservationPolarity;
+      tag: string;
+      body: string;
+      source_message_id?: string | null;
+      source_run_id?: number | null;
+    },
+  ): AgentObservation {
+    const ts = now();
+    const result = db
+      .prepare(
+        `INSERT INTO agent_observations
+         (agent_id, polarity, tag, body, source_message_id, source_run_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.agent_id,
+        input.polarity,
+        input.tag,
+        input.body,
+        input.source_message_id ?? null,
+        input.source_run_id ?? null,
+        ts,
+      );
+    return {
+      id: Number(result.lastInsertRowid),
+      agent_id: input.agent_id,
+      polarity: input.polarity,
+      tag: input.tag,
+      body: input.body,
+      source_message_id: input.source_message_id ?? null,
+      source_run_id: input.source_run_id ?? null,
+      created_at: ts,
+    };
+  },
+
+  /** 给 Coach 聚合用：按 tag 统计该 agent 在窗口内 negative observation 数量 */
+  countByTag(
+    db: Database,
+    agentId: string,
+    since: number,
+    polarity?: ObservationPolarity,
+  ): Array<{ tag: string; count: number }> {
+    const where: string[] = ['agent_id = ?', 'created_at >= ?'];
+    const params: unknown[] = [agentId, since];
+    if (polarity) {
+      where.push('polarity = ?');
+      params.push(polarity);
+    }
+    const rows = db
+      .prepare(
+        `SELECT tag, COUNT(*) AS count FROM agent_observations
+         WHERE ${where.join(' AND ')}
+         GROUP BY tag ORDER BY count DESC`,
+      )
+      .all(...params) as Array<{ tag: string; count: number }>;
+    return rows;
+  },
+};
+
+// =============================================================================
+// Agent Feedback (Sprint 5 / D-20 Evolution Loop)
+// =============================================================================
+
+interface FeedbackRow {
+  id: number;
+  agent_id: string;
+  period_start: number;
+  period_end: number;
+  summary: string;
+  rationale: string;
+  description_before: string;
+  description_after: string;
+  status: string;
+  confidence: number | null;
+  reviewed_by: string | null;
+  applied_at: number | null;
+  rejected_at: number | null;
+  rolled_back_at: number | null;
+  created_at: number;
+}
+
+function rowToFeedback(r: FeedbackRow): AgentFeedback {
+  return {
+    id: r.id,
+    agent_id: r.agent_id,
+    period_start: r.period_start,
+    period_end: r.period_end,
+    summary: r.summary,
+    rationale: r.rationale,
+    description_before: r.description_before,
+    description_after: r.description_after,
+    status: r.status as AgentFeedbackStatus,
+    confidence: r.confidence,
+    reviewed_by: r.reviewed_by,
+    applied_at: r.applied_at,
+    rejected_at: r.rejected_at,
+    rolled_back_at: r.rolled_back_at,
+    created_at: r.created_at,
+  };
+}
+
+export const feedbackRepo = {
+  listByAgent(db: Database, agentId: string): AgentFeedback[] {
+    const rows = db
+      .prepare(
+        'SELECT * FROM agent_feedback WHERE agent_id = ? ORDER BY created_at DESC',
+      )
+      .all(agentId) as FeedbackRow[];
+    return rows.map(rowToFeedback);
+  },
+
+  getById(db: Database, id: number): AgentFeedback | null {
+    const row = db.prepare('SELECT * FROM agent_feedback WHERE id = ?').get(id) as
+      | FeedbackRow
+      | undefined;
+    return row ? rowToFeedback(row) : null;
+  },
+
+  create(
+    db: Database,
+    input: {
+      agent_id: string;
+      period_start: number;
+      period_end: number;
+      summary: string;
+      rationale: string;
+      description_before: string;
+      description_after: string;
+      confidence?: number | null;
+    },
+  ): AgentFeedback {
+    const ts = now();
+    const result = db
+      .prepare(
+        `INSERT INTO agent_feedback
+         (agent_id, period_start, period_end, summary, rationale,
+          description_before, description_after, status, confidence, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+      )
+      .run(
+        input.agent_id,
+        input.period_start,
+        input.period_end,
+        input.summary,
+        input.rationale,
+        input.description_before,
+        input.description_after,
+        input.confidence ?? null,
+        ts,
+      );
+    const f = this.getById(db, Number(result.lastInsertRowid));
+    if (!f) throw new Error('feedback insert failed');
+    return f;
+  },
+
+  setStatus(
+    db: Database,
+    id: number,
+    status: AgentFeedbackStatus,
+    reviewer: string | null,
+  ): AgentFeedback | null {
+    const ts = now();
+    const fields: string[] = ['status = ?', 'reviewed_by = ?'];
+    const values: unknown[] = [status, reviewer];
+    if (status === 'applied') {
+      fields.push('applied_at = ?');
+      values.push(ts);
+    } else if (status === 'rejected') {
+      fields.push('rejected_at = ?');
+      values.push(ts);
+    } else if (status === 'rolled_back') {
+      fields.push('rolled_back_at = ?');
+      values.push(ts);
+    }
+    values.push(id);
+    db.prepare(`UPDATE agent_feedback SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    return this.getById(db, id);
   },
 };

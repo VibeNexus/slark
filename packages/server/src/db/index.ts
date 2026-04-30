@@ -8,6 +8,7 @@
  *   4 - v1.0 Sprint 2 CP1：新增 workflows / workflow_runs 表（D-16）
  *   5 - v1.0 Sprint 3 CP1：新增 responsibilities 表（D-17）
  *   6 - v1.0 Sprint 4 CP1：新增 decisions / lessons 表（D-20 Knowledge）
+ *   7 - v1.0 Sprint 5 CP1：新增 agent_observations / agent_feedback 表（D-20 Evolution Loop）
  */
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -25,7 +26,7 @@ const SCHEMA_CANDIDATES = [
 ];
 const SCHEMA_PATH = SCHEMA_CANDIDATES.find((p) => existsSync(p));
 
-const CURRENT_SCHEMA_VERSION = '6';
+const CURRENT_SCHEMA_VERSION = '7';
 
 let _db: DB | null = null;
 

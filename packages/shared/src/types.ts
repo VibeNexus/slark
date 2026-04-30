@@ -320,6 +320,44 @@ export interface WorkflowRunState {
 }
 
 // =============================================================================
+// Evolution Loop — observations + feedback (Sprint 5 / D-20)
+// =============================================================================
+
+export type ObservationPolarity = 'positive' | 'negative' | 'neutral';
+
+export interface AgentObservation {
+  id: number;
+  agent_id: string;
+  polarity: ObservationPolarity;
+  /** 短标签，Coach 用于聚合 */
+  tag: string;
+  body: string;
+  source_message_id: string | null;
+  source_run_id: number | null;
+  created_at: number;
+}
+
+export type AgentFeedbackStatus = 'pending' | 'applied' | 'rejected' | 'rolled_back';
+
+export interface AgentFeedback {
+  id: number;
+  agent_id: string;
+  period_start: number;
+  period_end: number;
+  summary: string;
+  rationale: string;
+  description_before: string;
+  description_after: string;
+  status: AgentFeedbackStatus;
+  confidence: number | null;
+  reviewed_by: string | null;
+  applied_at: number | null;
+  rejected_at: number | null;
+  rolled_back_at: number | null;
+  created_at: number;
+}
+
+// =============================================================================
 // Knowledge — Decisions / Lessons (Sprint 4 / D-20 Delivery Loop)
 // =============================================================================
 

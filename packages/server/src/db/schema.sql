@@ -272,3 +272,65 @@ CREATE TABLE IF NOT EXISTS lessons (
 CREATE INDEX IF NOT EXISTS idx_lessons_project ON lessons(project_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_lessons_review ON lessons(project_id, review_status);
 CREATE INDEX IF NOT EXISTS idx_lessons_audience ON lessons(project_id, audience);
+
+-- =============================================================================
+-- 16. agent_observations (Sprint 5 引入，对齐 D-20 Evolution Loop)
+--
+-- Evaluator 后台扫每个 agent 最近 N 个 task 产出后写入。Coach 聚合多条
+-- observations 提描述演化建议。
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS agent_observations (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id        TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  /** 'positive' / 'negative' / 'neutral'：Evaluator 标的方向 */
+  polarity        TEXT NOT NULL CHECK(polarity IN ('positive','negative','neutral')),
+  /** 短标签，便于 Coach 聚合（如 "missing_error_handling" / "good_test_coverage")*/
+  tag             TEXT NOT NULL,
+  body            TEXT NOT NULL,
+  /** 关联的 message id（如有）方便用户回溯 */
+  source_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+  source_run_id   INTEGER REFERENCES workflow_runs(id) ON DELETE SET NULL,
+  created_at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_observations_agent
+  ON agent_observations(agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_observations_tag
+  ON agent_observations(agent_id, tag);
+
+-- =============================================================================
+-- 17. agent_feedback (Sprint 5 引入)
+--
+-- Coach 提的 description 修改建议；用户在 Agent Profile FEEDBACK Tab 中
+-- approve/reject/apply。Apply 后写 applied=1 + applied_at；保留 diff 历史
+-- 以便回滚（Q-6）。
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS agent_feedback (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id              TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  /** Evaluator 收集观察的窗口起止 */
+  period_start          INTEGER NOT NULL,
+  period_end            INTEGER NOT NULL,
+  /** 简短摘要，供前端列表展示 */
+  summary               TEXT NOT NULL,
+  /** Coach 详细解释 */
+  rationale             TEXT NOT NULL,
+  /** Apply 前的 description（永远是当时的真实值，用于回滚） */
+  description_before    TEXT NOT NULL,
+  /** Coach 建议的 description 全文 */
+  description_after     TEXT NOT NULL,
+  /** 'pending' / 'applied' / 'rejected' / 'rolled_back' */
+  status                TEXT NOT NULL DEFAULT 'pending'
+                        CHECK(status IN ('pending','applied','rejected','rolled_back')),
+  /** Coach 置信度 */
+  confidence            REAL,
+  /** Apply 时的 actor（'local-user'）；Reject 同 */
+  reviewed_by           TEXT,
+  applied_at            INTEGER,
+  rejected_at           INTEGER,
+  rolled_back_at        INTEGER,
+  created_at            INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_agent
+  ON agent_feedback(agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_feedback_status
+  ON agent_feedback(agent_id, status);
