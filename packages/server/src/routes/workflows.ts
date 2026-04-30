@@ -256,6 +256,27 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
     return responsibilityRepo.listByWorkflow(db, id);
   });
 
+  // 跨 project 活跃 runs（Inbox 视图用，CP2）
+  app.get('/api/workflow-runs', async (req) => {
+    const query = req.query as {
+      status?: 'running' | 'awaiting_approval' | 'completed' | 'aborted' | 'failed';
+    };
+    const runs = workflowRunRepo.listActive(
+      db,
+      query.status ? { status: query.status } : undefined,
+    );
+    // 附上 workflow + channel 元数据，前端不用再 N+1 拉
+    return runs.map((r) => {
+      const wf = workflowRepo.getById(db, r.workflow_id);
+      const ch = channelRepo.getById(db, r.channel_id);
+      return {
+        ...r,
+        workflow: wf,
+        channel: ch,
+      };
+    });
+  });
+
   // 单次 run 详情
   app.get('/api/workflow-runs/:id', async (req, reply) => {
     const { id } = req.params as { id: string };

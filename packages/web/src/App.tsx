@@ -36,6 +36,7 @@ import { ChannelPage } from './pages/ChannelPage';
 import { DMPage } from './pages/DMPage';
 import { GlobalThreadsPage } from './pages/GlobalThreadsPage';
 import { GlobalTasksPage } from './pages/GlobalTasksPage';
+import { InboxPage } from './pages/InboxPage';
 import { SavedPage } from './pages/SavedPage';
 import { channelPath, dmPath } from './lib/routes';
 
@@ -70,6 +71,7 @@ export function App() {
           <Route path="/threads" element={<GlobalThreadsPage />} />
           <Route path="/tasks" element={<GlobalTasksPage />} />
           <Route path="/saved" element={<SavedPage />} />
+          <Route path="/inbox" element={<InboxPage />} />
 
           {/* 旧链接兼容 redirect（CP8.1 上线前的历史链接） */}
           <Route path="/channel/:channelId" element={<LegacyChannelRedirect />} />

@@ -106,11 +106,7 @@ export function WorkflowProgress({ channelId, threadId }: Props) {
         </div>
       )}
 
-      {run.status === 'awaiting_approval' && (
-        <div className="text-[11px] font-mono bg-bg-card border-2 border-black rounded px-2 py-1">
-          ⏸ Reply <code>/approve</code> or <code>/reject [reason]</code> in this thread to advance.
-        </div>
-      )}
+      {/* awaiting_approval 提示 UI 已迁移到 ApprovalCard 组件（CP2） */}
     </div>
   );
 }

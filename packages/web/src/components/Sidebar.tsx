@@ -241,6 +241,7 @@ function ChatTabContent({
       {/* 工具行 */}
       <div className="px-3 pt-3 space-y-0.5">
         <ToolButton icon={<SearchIcon />} label="Search" rightText="⌘K" onClick={onOpenSearch} />
+        <ToolLink icon={<InboxIcon />} label="Inbox" to="/inbox" />
         <ToolLink icon={<ThreadIcon />} label="Threads" to="/threads" />
         <ToolLink icon={<TaskIcon />} label="Tasks" to="/tasks" />
         <ToolLink icon={<BookmarkIcon />} label="Saved" to="/saved" />
@@ -489,6 +490,14 @@ function BookmarkIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+function InboxIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M22 12h-6l-2 3h-4l-2-3H2" />
+      <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
     </svg>
   );
 }

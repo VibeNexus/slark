@@ -14,6 +14,7 @@ import { useMessagesStore } from '../stores/messages';
 import { useAgentsStore } from '../stores/agents';
 import { wsClient } from '../lib/ws';
 import { useChannelCommands } from '../lib/useChannelCommands';
+import { ApprovalCard } from './ApprovalCard';
 import { Message } from './Message';
 import { MessageInput } from './MessageInput';
 import { WorkflowProgress } from './WorkflowProgress';
@@ -163,6 +164,7 @@ export function ThreadPanel({ channelId }: Props) {
                 streamingText={streamBuffers.get(m.id)}
               />
             ))}
+            <ApprovalCard channelId={channelId} threadId={threadId} />
           </>
         ) : (
           <div className="text-text-secondary font-mono text-sm py-6 text-center">

@@ -257,3 +257,10 @@ export const getActiveWorkflowRun = (channelId: string, threadId?: string) => {
     `/api/channels/${channelId}/active-workflow-run${qs}`,
   );
 };
+
+export const listActiveWorkflowRuns = (status?: 'running' | 'awaiting_approval') => {
+  const qs = status ? `?status=${status}` : '';
+  return request<Array<WorkflowRun & { workflow: Workflow | null; channel: Channel | null }>>(
+    `/api/workflow-runs${qs}`,
+  );
+};

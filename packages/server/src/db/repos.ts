@@ -1097,6 +1097,26 @@ export const workflowRunRepo = {
     return rows.map(rowToWorkflowRun);
   },
 
+  /** 列出全局活跃 runs（跨 channel / project）—— Inbox 视图用 */
+  listActive(db: Database, opts?: { status?: WorkflowRunStatus }): WorkflowRun[] {
+    if (opts?.status) {
+      const rows = db
+        .prepare(
+          'SELECT * FROM workflow_runs WHERE status = ? ORDER BY started_at DESC',
+        )
+        .all(opts.status) as WorkflowRunRow[];
+      return rows.map(rowToWorkflowRun);
+    }
+    const rows = db
+      .prepare(
+        `SELECT * FROM workflow_runs
+         WHERE status IN ('running','awaiting_approval')
+         ORDER BY started_at DESC`,
+      )
+      .all() as WorkflowRunRow[];
+    return rows.map(rowToWorkflowRun);
+  },
+
   /** 找 channel 当前活跃 run（running / awaiting_approval），可选按 thread 过滤 */
   getActive(
     db: Database,
