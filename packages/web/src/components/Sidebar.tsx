@@ -17,6 +17,7 @@ import {
   projectChannelPath,
   projectDmPath,
   projectIndexPath,
+  projectIntelligencePath,
   projectWorkflowsPath,
 } from '../lib/routes';
 import { Avatar } from './Avatar';
@@ -251,6 +252,13 @@ function ChatTabContent({
             icon={<WorkflowIcon />}
             label="Workflows"
             to={projectWorkflowsPath(projectName)}
+          />
+        )}
+        {projectName && (
+          <ToolLink
+            icon={<BookIcon />}
+            label="Intelligence"
+            to={projectIntelligencePath(projectName)}
           />
         )}
       </div>
@@ -516,6 +524,14 @@ function WorkflowIcon() {
       <circle cx="18" cy="6" r="3" />
       <circle cx="6" cy="18" r="3" />
       <path d="M9 6h6M6 9v6" />
+    </svg>
+  );
+}
+function BookIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
     </svg>
   );
 }

@@ -7,7 +7,11 @@ import type {
   AgentActivity,
   ChatMessage,
   Channel,
+  Decision,
+  Lesson,
+  LessonKind,
   Project,
+  ReviewStatus,
   RuntimeDetection,
   Task,
   TaskStatus,
@@ -300,3 +304,83 @@ export const importWorkflowYaml = (
     method: 'POST',
     body: JSON.stringify(data),
   });
+
+// Intelligence — Decisions / Lessons (Sprint 4 CP4)
+
+export const listProjectDecisions = (projectId: string, status?: ReviewStatus) => {
+  const qs = status ? `?status=${status}` : '';
+  return request<Decision[]>(`/api/projects/${projectId}/decisions${qs}`);
+};
+
+export const createDecision = (
+  projectId: string,
+  data: { title: string; body: string; audience?: string; source_message_id?: string | null },
+) =>
+  request<Decision>(`/api/projects/${projectId}/decisions`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+
+export const updateDecision = (
+  id: number,
+  patch: {
+    review_status?: ReviewStatus;
+    title?: string;
+    body?: string;
+    audience?: string;
+  },
+) =>
+  request<Decision>(`/api/decisions/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+
+export const deleteDecision = (id: number) =>
+  request<void>(`/api/decisions/${id}`, { method: 'DELETE' });
+
+export const listProjectLessons = (
+  projectId: string,
+  opts?: { status?: ReviewStatus; audience?: string; kind?: LessonKind },
+) => {
+  const qs = new URLSearchParams();
+  if (opts?.status) qs.set('status', opts.status);
+  if (opts?.audience) qs.set('audience', opts.audience);
+  if (opts?.kind) qs.set('kind', opts.kind);
+  const q = qs.toString();
+  return request<Lesson[]>(`/api/projects/${projectId}/lessons${q ? `?${q}` : ''}`);
+};
+
+export const createLesson = (
+  projectId: string,
+  data: {
+    kind: LessonKind;
+    title: string;
+    body: string;
+    audience?: string;
+    tags?: string[];
+    source_message_id?: string | null;
+  },
+) =>
+  request<Lesson>(`/api/projects/${projectId}/lessons`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+
+export const updateLesson = (
+  id: number,
+  patch: {
+    review_status?: ReviewStatus;
+    title?: string;
+    body?: string;
+    audience?: string;
+    kind?: LessonKind;
+    tags?: string[];
+  },
+) =>
+  request<Lesson>(`/api/lessons/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+
+export const deleteLesson = (id: number) =>
+  request<void>(`/api/lessons/${id}`, { method: 'DELETE' });

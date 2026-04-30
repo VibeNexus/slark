@@ -37,6 +37,7 @@ import { DMPage } from './pages/DMPage';
 import { GlobalThreadsPage } from './pages/GlobalThreadsPage';
 import { GlobalTasksPage } from './pages/GlobalTasksPage';
 import { InboxPage } from './pages/InboxPage';
+import { IntelligencePage } from './pages/IntelligencePage';
 import { SavedPage } from './pages/SavedPage';
 import { WorkflowsPage } from './pages/WorkflowsPage';
 import { channelPath, dmPath } from './lib/routes';
@@ -67,6 +68,7 @@ export function App() {
             <Route path="dm/:agentId" element={<DMPage />} />
             <Route path="agent/:agentId" element={<AgentPlaceholder />} />
             <Route path="workflows" element={<WorkflowsPage />} />
+            <Route path="intelligence" element={<IntelligencePage />} />
           </Route>
 
           {/* 全局视图（跨 Project） */}
