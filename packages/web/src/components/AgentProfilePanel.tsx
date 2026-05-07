@@ -10,12 +10,13 @@
 
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import type { Agent, AgentActivity, AgentFeedback, AgentStatus } from '@slark/shared';
+import type { Agent, AgentActivity, AgentFeedback, AgentStatus, ReasoningEffort } from '@slark/shared';
 import { cn } from '../lib/cn';
 import {
   applyAgentFeedback,
   deleteAgent,
   getAgentActivity,
+  getRuntimeModels,
   listAgentFeedback,
   rejectAgentFeedback,
   restartAgent,
@@ -409,6 +410,14 @@ function ProfileTab({
     const updated = await updateAgent(agent.id, { env_vars: parsed });
     upsertAgent(updated);
   };
+  const saveModel = async (v: string) => {
+    const updated = await updateAgent(agent.id, { model: v });
+    upsertAgent(updated);
+  };
+  const saveReasoning = async (v: string) => {
+    const updated = await updateAgent(agent.id, { reasoning: v as ReasoningEffort });
+    upsertAgent(updated);
+  };
 
   return (
     <div className="p-4 space-y-5">
@@ -442,8 +451,12 @@ function ProfileTab({
         <div className="section-header mb-3">INFO</div>
         <div className="flex gap-4 flex-wrap">
           <InfoTag label="Runtime" value={agent.runtime} color="teal" />
-          <InfoTag label="Model" value={agent.model ?? '-'} color="purple" />
-          <InfoTag label="Reasoning" value={agent.reasoning ?? '-'} color="yellow" />
+          <ModelEditTag
+            agentRuntime={agent.runtime}
+            value={agent.model ?? ''}
+            onSave={saveModel}
+          />
+          <ReasoningEditTag value={agent.reasoning ?? 'medium'} onSave={saveReasoning} />
         </div>
         <div className="mt-4">
           <div className="text-xs text-text-secondary font-mono">Born</div>
@@ -655,6 +668,160 @@ function InfoTag({ label, value, color }: { label: string; value: string; color:
       </span>
     </div>
   );
+}
+
+/**
+ * Sprint 4-ext：Agent 模型 inline 编辑下拉（点击切换为 select）。
+ *
+ * options 通过 `/api/runtimes/cursor/models` 拉，懒加载（首次进 edit 模式时拉）。
+ * 当前 model 不在 options 列表里也能保留显示，用户切换后被 SDK auto-fallback 兜底。
+ */
+function ModelEditTag({
+  agentRuntime,
+  value,
+  onSave,
+}: {
+  agentRuntime: string;
+  value: string;
+  onSave: (v: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [models, setModels] = useState<string[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!editing || models !== null || loading) return;
+    setLoading(true);
+    void getRuntimeModels(agentRuntime as 'cursor')
+      .then((res) => setModels(res.models ?? []))
+      .catch(() => setModels([]))
+      .finally(() => setLoading(false));
+  }, [editing, models, loading, agentRuntime]);
+
+  const onChange = async (next: string) => {
+    if (next === value) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(next);
+    } finally {
+      setSaving(false);
+      setEditing(false);
+    }
+  };
+
+  if (editing) {
+    const merged = mergeOptions(models ?? [], value);
+    return (
+      <div>
+        <div className="text-xs text-text-secondary font-mono mb-1">Model</div>
+        <select
+          autoFocus
+          disabled={saving}
+          value={value}
+          onChange={(e) => void onChange(e.target.value)}
+          onBlur={() => setEditing(false)}
+          className="px-2 py-1 border-2 border-black rounded font-mono text-sm bg-accent-purple max-w-[14rem]"
+        >
+          {loading && <option>Loading…</option>}
+          {!loading &&
+            merged.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+        </select>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      className="block text-left group"
+      title="Click to change model"
+    >
+      <div className="text-xs text-text-secondary font-mono mb-1 group-hover:text-text-primary">
+        Model ✎
+      </div>
+      <span className="inline-block px-2 py-1 border-2 border-black rounded font-mono text-sm bg-accent-purple group-hover:brightness-105">
+        {value || '-'}
+      </span>
+    </button>
+  );
+}
+
+function ReasoningEditTag({
+  value,
+  onSave,
+}: {
+  value: ReasoningEffort | string;
+  onSave: (v: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const options: ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+
+  const onChange = async (next: string) => {
+    if (next === value) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(next);
+    } finally {
+      setSaving(false);
+      setEditing(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div>
+        <div className="text-xs text-text-secondary font-mono mb-1">Reasoning</div>
+        <select
+          autoFocus
+          disabled={saving}
+          value={value}
+          onChange={(e) => void onChange(e.target.value)}
+          onBlur={() => setEditing(false)}
+          className="px-2 py-1 border-2 border-black rounded font-mono text-sm bg-accent-yellow"
+        >
+          {options.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      className="block text-left group"
+      title="Click to change reasoning effort"
+    >
+      <div className="text-xs text-text-secondary font-mono mb-1 group-hover:text-text-primary">
+        Reasoning ✎
+      </div>
+      <span className="inline-block px-2 py-1 border-2 border-black rounded font-mono text-sm bg-accent-yellow group-hover:brightness-105">
+        {value || '-'}
+      </span>
+    </button>
+  );
+}
+
+function mergeOptions(list: string[], current: string): string[] {
+  if (!current) return list;
+  return list.includes(current) ? list : [current, ...list];
 }
 
 function IconButton({

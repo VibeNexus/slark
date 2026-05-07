@@ -39,6 +39,7 @@ import { GlobalTasksPage } from './pages/GlobalTasksPage';
 import { InboxPage } from './pages/InboxPage';
 import { IntelligencePage } from './pages/IntelligencePage';
 import { SavedPage } from './pages/SavedPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { WorkflowsPage } from './pages/WorkflowsPage';
 import { channelPath, dmPath } from './lib/routes';
 
@@ -76,6 +77,7 @@ export function App() {
           <Route path="/tasks" element={<GlobalTasksPage />} />
           <Route path="/saved" element={<SavedPage />} />
           <Route path="/inbox" element={<InboxPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
 
           {/* 旧链接兼容 redirect（CP8.1 上线前的历史链接） */}
           <Route path="/channel/:channelId" element={<LegacyChannelRedirect />} />

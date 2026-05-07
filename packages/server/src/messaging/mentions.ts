@@ -14,6 +14,21 @@
 // @ 前面不能是字母/数字（否则是 email），后面可接字母数字连字符下划线或中文字符
 const MENTION_RE = /(^|[^\w@])@([A-Za-z0-9_\-\u4e00-\u9fa5]+)/g;
 
+/**
+ * Sprint 4-ext "@all" 别名集合（大小写不敏感比较）。
+ *
+ * 任一别名出现在 mention 名单中 → 在 channel 级展开为"所有 agent"。
+ * - `all` / `everyone` / `channel`：英文常见
+ * - `所有人`：中文用户友好（mentions.ts 的 regex 已支持中文）
+ *
+ * 链式触发（agent 回复里 @all）会被静默忽略，仅用户消息生效，详见 router.ts。
+ */
+export const EVERYONE_ALIASES = new Set(['all', 'everyone', 'channel', '所有人']);
+
+export function isEveryoneMention(name: string): boolean {
+  return EVERYONE_ALIASES.has(name.toLowerCase());
+}
+
 export interface ParsedMention {
   name: string;
   /** 在 content 中的位置（用于 UI 高亮） */

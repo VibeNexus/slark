@@ -26,3 +26,8 @@ docs/ui-reference/screenshots/
 
 # Local data
 .slark/
+
+# Local secrets (Cursor API key, future tokens) — 永不入库
+.env
+.env.local
+.env.*.local

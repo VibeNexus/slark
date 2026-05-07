@@ -30,7 +30,7 @@ import {
 } from '../db/repos.js';
 import { hub } from '../ws/hub.js';
 import { triggerAgent } from '../agents/engine.js';
-import { parseMentions } from './mentions.js';
+import { isEveryoneMention, parseMentions } from './mentions.js';
 import {
   abortWorkflowRun,
   advanceWithUserAction,
@@ -65,19 +65,24 @@ export async function routeUserMessage(
 
   if (!content.trim()) return;
 
-  // 1. 解析 @mention
+  // 1. 解析 @mention（用户消息允许 @all 展开为全员）
   const mentions = parseMentions(content);
-  const mentionsInChannel = await resolveMentionsToAgents(
+  const resolved = await resolveMentionsToAgents(
     db,
     channelId,
     mentions.map((m) => m.name),
+    { allowEveryone: true },
   );
+  const mentionsInChannel = resolved.agents;
 
   // 2. 落库 user message
   const metadata: MessageMetadata = {
     mentions: mentions.map((m) => ({
       name: m.name,
-      agent_id: mentionsInChannel.find((a) => a.name === m.name)?.id ?? null,
+      // @all 等别名 agent_id=null（不绑到具体 agent；前端可特殊渲染）
+      agent_id: isEveryoneMention(m.name)
+        ? null
+        : mentionsInChannel.find((a) => a.name === m.name)?.id ?? null,
     })),
     chain_depth: 0,
   };
@@ -146,14 +151,39 @@ export async function routeUserMessage(
   // 4. 触发被 @mention 的 agents（并发）
   if (mentionsInChannel.length === 0) {
     logger.info(`[router] no agent mentions in message ${userMsg.id}`);
+    // 频道里有 agent 但用户没 @ 任何一个 → 给一条系统提示，避免新用户困惑
+    // 仅当频道里真的有 agent 时才提示（DM / 空频道无意义）
+    const channelAgents = agentRepo.listInChannel(db, channelId);
+    if (channelAgents.length > 0 && !threadId) {
+      const sample = channelAgents
+        .slice(0, 2)
+        .map((a) => `@${a.name}`)
+        .join(' / ');
+      emitInfoMessage(
+        db,
+        channelId,
+        null,
+        `ℹ 没有 agent 被 @ 到。试试 ${sample}，或用 \`@all\` 让所有 agent 响应。`,
+      );
+    }
     return;
   }
 
-  if (mentionsInChannel.length > MAX_MENTIONS_PER_MESSAGE) {
+  // @all 展开后豁免 MAX_MENTIONS_PER_MESSAGE 截断（用户显式意图，并发由队列保护）；
+  // 否则按原规则截断防滥用。
+  if (
+    !resolved.expandedFromEveryone &&
+    mentionsInChannel.length > MAX_MENTIONS_PER_MESSAGE
+  ) {
     logger.warn(
       `[router] message has ${mentionsInChannel.length} mentions, truncating to ${MAX_MENTIONS_PER_MESSAGE}`,
     );
     mentionsInChannel.length = MAX_MENTIONS_PER_MESSAGE;
+  }
+  if (resolved.expandedFromEveryone) {
+    logger.info(
+      `[router] @all/@everyone expanded to ${mentionsInChannel.length} agent(s) in channel ${channelId}`,
+    );
   }
 
   // Thread 策略（与 slock.ai 对齐）：
@@ -230,14 +260,23 @@ async function safeTriggerChain(
   const replyMentions = parseMentions(result.fullText);
   if (replyMentions.length === 0) return;
 
-  const nextAgents = await resolveMentionsToAgents(
+  // Sprint 4-ext：链式中显式禁用 @all/@everyone（仅用户消息允许）。
+  // 否则 agent A 回复一句 "@all 大家来帮我" → 触发 N 个 agent → 每个回复又可能 @all → 雪崩。
+  // 静默忽略 @all 别名，仍允许 agent 显式 @ 具体 agent 协作。
+  const chainResolved = await resolveMentionsToAgents(
     db,
     ctx.channelId,
     replyMentions.map((m) => m.name),
+    { allowEveryone: false },
   );
+  if (chainResolved.everyoneBlocked) {
+    logger.warn(
+      `[router] ${agent.name} tried to @all in reply (chain depth ${ctx.chainDepth}); ignored`,
+    );
+  }
 
   // 排除自己（避免 A @A 死循环第一层）
-  const nextTargets = nextAgents.filter((a) => a.id !== agent.id);
+  const nextTargets = chainResolved.agents.filter((a) => a.id !== agent.id);
 
   if (nextTargets.length === 0) return;
 
@@ -531,24 +570,58 @@ async function manualSediment(input: {
   );
 }
 
+/**
+ * 解析 mention 名字 → channel 内的 agent。
+ *
+ * Sprint 4-ext：支持 `@all` / `@everyone` / `@所有人` 展开为 channel 全部 agent。
+ * 链式触发场景必须 allowEveryone=false，防止 agent 自己 @all 触发雪崩响应。
+ */
+interface ResolvedMentions {
+  agents: Agent[];
+  /** 是否包含 @all 展开（用于豁免 MAX_MENTIONS_PER_MESSAGE 截断）*/
+  expandedFromEveryone: boolean;
+  /** @all 出现但被禁用（chain 中），用于打 warn 日志 */
+  everyoneBlocked: boolean;
+}
+
 async function resolveMentionsToAgents(
   db: Database,
   channelId: string,
   names: string[],
-): Promise<Agent[]> {
-  if (names.length === 0) return [];
+  options: { allowEveryone: boolean } = { allowEveryone: true },
+): Promise<ResolvedMentions> {
+  if (names.length === 0) {
+    return { agents: [], expandedFromEveryone: false, everyoneBlocked: false };
+  }
   const channelAgents = agentRepo.listInChannel(db, channelId);
   const byName = new Map(channelAgents.map((a) => [a.name.toLowerCase(), a]));
   const result: Agent[] = [];
   const seen = new Set<string>();
+  let expandedFromEveryone = false;
+  let everyoneBlocked = false;
+
   for (const n of names) {
+    if (isEveryoneMention(n)) {
+      if (!options.allowEveryone) {
+        everyoneBlocked = true;
+        continue;
+      }
+      for (const a of channelAgents) {
+        if (!seen.has(a.id)) {
+          seen.add(a.id);
+          result.push(a);
+        }
+      }
+      expandedFromEveryone = true;
+      continue;
+    }
     const agent = byName.get(n.toLowerCase());
     if (agent && !seen.has(agent.id)) {
       seen.add(agent.id);
       result.push(agent);
     }
   }
-  return result;
+  return { agents: result, expandedFromEveryone, everyoneBlocked };
 }
 
 function emitSystemMessage(

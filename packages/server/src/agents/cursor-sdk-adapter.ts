@@ -36,6 +36,32 @@ type SDKMessage = import('@cursor/sdk').SDKMessage;
 
 const DEFAULT_MODEL = 'composer-2';
 
+/**
+ * cursor-agent CLI ↔ Cursor SDK 模型 ID 兼容表。
+ *
+ * cursor-agent 接受 `composer-2-fast` / `auto` 等别名，SDK 严格只接受 `Cursor.models.list()`
+ * 返回的 ID（截至 v1.0.10：default / composer-2 / composer-1.5 / gpt-5.x / claude-x / gemini-x / grok-x / kimi-x）。
+ *
+ * 老 db 里的 agent.model 可能是 cursor-agent 时代留下来的字符串（Team Architect 历史推荐过
+ * `composer-2-fast`）。这里在 SDK 模式下做透明映射，避免大批 agent spawn 失败。
+ */
+const MODEL_ALIASES: Record<string, string> = {
+  'composer-2-fast': 'composer-2',
+  'composer-2-balanced': 'composer-2',
+  auto: 'default',
+};
+
+function normalizeModelId(raw?: string | null): string {
+  if (!raw) return DEFAULT_MODEL;
+  const trimmed = raw.trim();
+  if (!trimmed) return DEFAULT_MODEL;
+  return MODEL_ALIASES[trimmed] ?? trimmed;
+}
+
+function isUnknownModelError(err: Error): boolean {
+  return /Cannot use this model/i.test(err.message);
+}
+
 let _sdkPromise: Promise<SdkModule> | null = null;
 async function loadSdk(): Promise<SdkModule> {
   if (!_sdkPromise) {
@@ -165,27 +191,67 @@ export class CursorSdkAdapter implements CLIAdapter {
     let cancelOnAbort: (() => void) | null = null;
 
     try {
+      // 模型 ID 解析 + auto-fallback：SDK 拒绝的 model 自动重试 'default'，让用户的 agent
+      // 总能跑起来（哪怕配了一个 SDK 不识别的 ID，也只是降级到 default），不再硬挂。
+      const requestedModel = normalizeModelId(params.model);
+      let actualModel = requestedModel;
       try {
         agent = await sdk.Agent.create({
           apiKey,
-          model: { id: params.model ?? DEFAULT_MODEL },
+          model: { id: requestedModel },
           ...(params.workingDirectory ? { local: { cwd: params.workingDirectory } } : {}),
         });
       } catch (e) {
-        emit({
-          type: 'error',
-          message: `Agent.create failed: ${(e as Error).message}`,
-          code: 'sdk_create_failed',
-        });
-        return {
-          exitCode: null,
-          fullText,
-          events,
-          duration_ms: Date.now() - start,
-          timedOut: false,
-          aborted: false,
-        };
+        const err = e as Error;
+        if (isUnknownModelError(err) && requestedModel !== 'default') {
+          // 第二次机会：用 default 再试
+          actualModel = 'default';
+          try {
+            agent = await sdk.Agent.create({
+              apiKey,
+              model: { id: 'default' },
+              ...(params.workingDirectory ? { local: { cwd: params.workingDirectory } } : {}),
+            });
+            // 软警告事件 + 继续 — 不阻断
+            emit({
+              type: 'error',
+              message: `Model "${params.model}" not supported by Cursor SDK; fell back to "default". Update agent settings to silence this warning.`,
+              code: 'sdk_model_fallback',
+              recoverable: true,
+            });
+          } catch (e2) {
+            emit({
+              type: 'error',
+              message: `Agent.create failed (both "${requestedModel}" and "default"): ${(e2 as Error).message}`,
+              code: 'sdk_create_failed',
+            });
+            return {
+              exitCode: null,
+              fullText,
+              events,
+              duration_ms: Date.now() - start,
+              timedOut: false,
+              aborted: false,
+            };
+          }
+        } else {
+          emit({
+            type: 'error',
+            message: `Agent.create failed: ${err.message}`,
+            code: 'sdk_create_failed',
+          });
+          return {
+            exitCode: null,
+            fullText,
+            events,
+            duration_ms: Date.now() - start,
+            timedOut: false,
+            aborted: false,
+          };
+        }
       }
+      // ESLint：actualModel 在 fallback 路径已被使用（emit 内嵌字符串），保留以便未来扩展
+      void actualModel;
 
       const run = await agent.send(params.prompt);
 
@@ -214,11 +280,28 @@ export class CursorSdkAdapter implements CLIAdapter {
         }
       }
 
+      // 累加 SDK 流中所有 assistant text block（按 SDK 文档示例语义增量输出）。
+      // 一个 turn 可能有多个 SDKAssistantMessage，每个 content 是该时间点的增量片段。
+      let assistantBuf = '';
+
       try {
         for await (const msg of run.stream()) {
-          this.mapSdkMessage(msg, emit);
+          this.mapSdkMessage(msg, emit, (delta) => {
+            assistantBuf += delta;
+          });
         }
         const result = await run.wait();
+
+        // 优先用 run.wait().result（如果 SDK 提供了），否则 fallback 到流累加。
+        // v1.0.10 实测 result.result 偶尔为 undefined，必须 fallback。
+        const finalText =
+          typeof result.result === 'string' && result.result.length > 0
+            ? result.result
+            : assistantBuf;
+        if (finalText) {
+          emit({ type: 'text.completed', text: finalText });
+        }
+
         emit({
           type: 'session.completed',
           duration_ms: result.durationMs,
@@ -264,8 +347,15 @@ export class CursorSdkAdapter implements CLIAdapter {
    *
    * S-2：SDKToolUseMessage 直接给 { name, args, result, status, truncated }，避免
    * CursorAdapter 里依赖 `xxxToolCall` 后缀的脆弱解析。
+   *
+   * @param onAssistantText 收集流式 assistant text 增量（SDK 文档示例语义：每个 block
+   *   按字符串顺序累加输出）。runDirect 用累加结果 fallback `RunResult.result` 为空的情况。
    */
-  private mapSdkMessage(msg: SDKMessage, emit: (e: CLIEvent) => void): void {
+  private mapSdkMessage(
+    msg: SDKMessage,
+    emit: (e: CLIEvent) => void,
+    onAssistantText: (delta: string) => void,
+  ): void {
     switch (msg.type) {
       case 'system':
         emit({
@@ -285,12 +375,16 @@ export class CursorSdkAdapter implements CLIAdapter {
         break;
 
       case 'assistant': {
+        // SDK 文档（cursor.com/docs/sdk/typescript）的 stream 示例直接 process.stdout.write(block.text)
+        // 累加输出，说明每个 text block 是该 turn 的增量片段。我们累加到 onAssistantText 收集器，
+        // 不在流中 emit text.completed（避免上层 supportsTextDelta=true 模式覆盖 fullText）。
+        // 最终 fullText 在 runDirect 里用 RunResult.result 优先、累加值 fallback 的方式产生。
+        // tool_use blocks 已由独立的 'tool_call' SDKMessage 覆盖，这里不处理。
         const blocks = msg.message.content ?? [];
         for (const block of blocks) {
           if (block.type === 'text' && block.text) {
-            emit({ type: 'text.completed', text: block.text });
+            onAssistantText(block.text);
           }
-          // tool_use blocks 已由独立的 'tool_call' 事件覆盖，这里不重复 emit
         }
         break;
       }

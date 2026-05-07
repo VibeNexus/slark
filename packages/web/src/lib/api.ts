@@ -9,6 +9,8 @@ import type {
   AgentSkill,
   ChatMessage,
   Channel,
+  CursorBackendStatus,
+  CursorBackendUpdateInput,
   Decision,
   Lesson,
   LessonKind,
@@ -56,6 +58,19 @@ export const getHealth = () => request<Health>('/api/health');
 export const getRuntimes = () => request<RuntimeDetection[]>('/api/runtimes');
 export const getRuntimeModels = (id: Runtime) =>
   request<{ models: string[]; note?: string; error?: string }>(`/api/runtimes/${id}/models`);
+
+// Cursor backend settings (Sprint 4-ext / S-1 收尾)
+export const getCursorSettings = (validate = false) =>
+  request<CursorBackendStatus>(
+    `/api/settings/cursor${validate ? '?validate=true' : ''}`,
+  );
+export const updateCursorSettings = (
+  data: CursorBackendUpdateInput & { validate?: boolean },
+) =>
+  request<CursorBackendStatus>('/api/settings/cursor', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
 
 // Projects (v1.0 新增)
 export const listProjects = () => request<Project[]>('/api/projects');

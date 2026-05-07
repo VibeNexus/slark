@@ -504,3 +504,38 @@ export interface TeamSuggestion {
   /** 兜底触发的具体原因（仅 is_fallback = true 时存在） */
   fallback_reason?: string;
 }
+
+// =============================================================================
+// Cursor Backend Settings (Sprint 4-ext / S-1 收尾)
+//
+// 用户在 UI Settings 页配置的 Cursor backend 选项，持久化到 ~/.slark/settings.json。
+// 与 .env / shell env 的合并优先级见 packages/server/src/config/cursor-settings.ts 顶注。
+// =============================================================================
+export type CursorBackend = 'cli' | 'sdk';
+
+export interface CursorBackendStatus {
+  /** 当前生效的 backend（按优先级合并后） */
+  backend: CursorBackend;
+  /** 是否已配置 API key（来自 env / .env / settings.json 任一源） */
+  hasApiKey: boolean;
+  /** API key 来源（仅展示，不回传具体值） */
+  apiKeySource: 'env' | 'settings' | null;
+  /** Cursor.me() 验证通过返回的用户身份；validate=false 时不携带 */
+  identity?: {
+    apiKeyName: string;
+    userEmail?: string;
+  };
+  /** validate 时遇到的错误（如 401） */
+  identityError?: string;
+  /** SDK 模式额外检查 */
+  ripgrep?: {
+    configured: boolean;
+    path?: string;
+  };
+}
+
+export interface CursorBackendUpdateInput {
+  backend?: CursorBackend;
+  /** 留空 = 不改；显式空字符串 = 清除已保存的 key */
+  apiKey?: string | null;
+}

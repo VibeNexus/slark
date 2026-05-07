@@ -11,10 +11,26 @@
  *   3. summarizeToolArgs() 给典型工具 args 输出可读摘要
  */
 
+import { loadDotenv, configureCursorRipgrep } from '../src/load-env.js';
+const envLoad = loadDotenv();
+const rgConfig = configureCursorRipgrep();
+
 import { createCursorAdapter } from '../src/agents/adapter-factory.js';
 import { CursorSdkAdapter } from '../src/agents/cursor-sdk-adapter.js';
 import { CursorAdapter } from '../src/agents/cursor-adapter.js';
 import { summarizeToolArgs } from '../src/agents/summarize-tool-args.js';
+
+if (envLoad.loaded) {
+  console.log(`[verify] loaded .env from ${envLoad.source} (${envLoad.keysApplied.length} keys)`);
+}
+if (rgConfig.configured) {
+  console.log(
+    `[verify] CURSOR_RIPGREP_PATH ${rgConfig.alreadySet ? '(already set)' : 'auto-configured'} → ${rgConfig.path}`,
+  );
+} else if (rgConfig.reason && !rgConfig.reason.startsWith('SLARK_CURSOR_BACKEND')) {
+  console.log(`[verify] WARN: ${rgConfig.reason}`);
+}
+console.log();
 
 let failed = 0;
 function expect(cond: boolean, msg: string) {
@@ -50,15 +66,36 @@ console.log('1. adapter-factory 选择');
   else process.env.SLARK_CURSOR_BACKEND = orig;
 }
 
-console.log('\n2. CursorSdkAdapter checkInstallation 不崩溃');
+console.log('\n2. CursorSdkAdapter checkInstallation');
 {
   const sdkAdapter = new CursorSdkAdapter();
   const orig = process.env.CURSOR_API_KEY;
+
+  // 2a. 缺 key → installed=false（恒成立的健壮性检查）
   delete process.env.CURSOR_API_KEY;
   const noKey = await sdkAdapter.checkInstallation();
   expect(noKey.installed === false, '无 CURSOR_API_KEY → installed=false');
   expect(typeof noKey.error === 'string' && noKey.error.length > 0, '提供 error 信息');
   if (orig !== undefined) process.env.CURSOR_API_KEY = orig;
+
+  // 2b. 有 key → 真发 Cursor.me() 验证 key 有效（需要 sqlite3 binding 已编译）
+  if (process.env.CURSOR_API_KEY) {
+    console.log('  → CURSOR_API_KEY 已设置，尝试真实 auth check（需要 sqlite3 binding）...');
+    try {
+      const real = await sdkAdapter.checkInstallation();
+      if (real.installed) {
+        console.log(`  ✓ Cursor.me() 通过：${real.path ?? '(no email)'}`);
+      } else {
+        console.log(`  ✗ Cursor.me() 失败：${real.error}`);
+        failed += 1;
+      }
+    } catch (e) {
+      console.log(`  ✗ checkInstallation 抛异常：${(e as Error).message}`);
+      failed += 1;
+    }
+  } else {
+    console.log('  (跳过真实 auth check：未设置 CURSOR_API_KEY)');
+  }
 }
 
 console.log('\n3. summarizeToolArgs 摘要质量');

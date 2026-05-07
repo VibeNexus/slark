@@ -421,6 +421,10 @@ function Step2({
             {suggestion.agents.map((agent, i) => (
               <AgentCard key={i} agent={agent} />
             ))}
+            <div className="text-[11px] font-mono text-text-secondary pl-1">
+              ℹ Approve 之后可在 Sidebar 的 Members tab 点 agent 头像，进 Profile 调整
+              model / reasoning。
+            </div>
           </div>
         </>
       )}
@@ -463,9 +467,11 @@ function AgentCard({ agent }: { agent: TeamSuggestionAgent }) {
     <div className="p-3 border-2 border-black rounded bg-bg-card">
       <div className="flex items-center justify-between mb-1">
         <div className="font-bold">{agent.name}</div>
-        <div className="flex gap-1">
+        <div className="flex gap-1 flex-wrap justify-end">
           <Tag>{agent.role}</Tag>
           <Tag>{agent.runtime || 'no runtime'}</Tag>
+          {agent.model && <Tag>{agent.model}</Tag>}
+          {agent.reasoning && <Tag>{agent.reasoning}</Tag>}
         </div>
       </div>
       <div className="text-[12px] text-text-secondary font-mono">{agent.description}</div>

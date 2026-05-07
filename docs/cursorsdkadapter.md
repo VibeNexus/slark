@@ -476,36 +476,88 @@ type AgentCard = {
 | 未设置 / `SLARK_CURSOR_BACKEND=cli`（默认）| 走 `CursorAdapter`，spawn `cursor-agent` 子进程 | 需要本机已安装 `cursor-agent` 并已登录（与原状一致） |
 | `SLARK_CURSOR_BACKEND=sdk` | 走 `CursorSdkAdapter`，使用 `@cursor/sdk` 直连 | 需要 `CURSOR_API_KEY` 环境变量 + sqlite3 native binding 已编译（见 9.2） |
 
-### 9.2 启用 SDK 后端的额外步骤
+### 9.2 启用 SDK 后端：两种方式
 
-`@cursor/sdk` 间接依赖 `sqlite3@^5.1.7`（native binding）。pnpm 默认会因为安全策略
-不自动构建第三方 native 模块；首次启用时需要：
+`@cursor/sdk` 间接依赖 `sqlite3@^5.1.7`（native binding）。仓库根 `package.json`
+的 `pnpm.onlyBuiltDependencies` 已加入 `sqlite3`，所以 `pnpm install` 会自动编译，
+**无需手动 `pnpm approve-builds`**。
+
+#### 方式 A — UI 配置（推荐，新用户友好）
 
 ```bash
-# 1. 配 API key（从 https://cursor.com/dashboard/integrations 获取）
-export CURSOR_API_KEY=...
+# 1. 启动 Slark
+pnpm dev
 
-# 2. 让 pnpm 允许 sqlite3 编译（一次性）
-pnpm approve-builds   # 选择 sqlite3 -> Yes
-
-# 3. 切到 SDK 后端启动 server
-SLARK_CURSOR_BACKEND=sdk pnpm dev
+# 2. 浏览器打开 http://localhost:4178/settings（Sidebar 底部齿轮也能进）
+# 3. 在 Cursor Backend 卡片：
+#    - 选 "SDK" backend
+#    - 粘贴 API key（从 https://cursor.com/dashboard/integrations 获取）
+#    - 点 "Save & Verify"
+# 4. 立即看到 "Verified as: <你的邮箱>" → 配置生效，无需重启 server
 ```
+
+UI 写入到 `~/.slark/settings.json`，Slark 启动时通过 `mergeUserSettings()` 注入
+到 `process.env`。文件不进入版本库（与数据库同目录，被 `.gitignore` 覆盖）。
+
+#### 方式 B — `.env` 文件（CI / 脚本场景）
+
+```bash
+# 1. 拿 User API key：https://cursor.com/dashboard/integrations
+#    （必须是 user key 或 service account key；Team Admin key 不支持）
+
+# 2. 在仓库根 .env 写入（.env 已加入 .gitignore）
+cat > .env <<'EOF'
+CURSOR_API_KEY=crsr_your_key_here
+SLARK_CURSOR_BACKEND=sdk
+EOF
+
+# 3. 启动 server
+pnpm dev
+```
+
+#### 优先级
+
+启动时按这个顺序合并（后到的不覆盖前到的）：
+
+1. shell `export` 的环境变量（CI 显式 override 最高）
+2. `.env`（项目根 / `SLARK_ENV_FILE` 指定）
+3. `~/.slark/settings.json`（UI 配置）
+4. defaults（`cli` / 无 key）
 
 > 默认（cli）模式下，**`@cursor/sdk` 通过 lazy dynamic import 引入**，启动时不会触发
 > sqlite3 加载，因此默认用户无需任何额外操作。
+>
+> `.env` / `settings.json` 由 `packages/server/src/load-env.ts` 在 server 入口加载（不依赖
+> `dotenv` 包）。如需自定义 .env 路径，设置 `SLARK_ENV_FILE` 环境变量。
+>
+> UI Settings 页也会在 SDK 模式下展示 ripgrep 路径自动定位结果（详见 §9.4 故障排查）。
 
 ### 9.3 验证
 
 ```bash
-# 不依赖 SQLite，verify adapter factory + summarizer 行为
+# CLI 触发：不依赖 SQLite，verify adapter factory + summarizer + 真实 Cursor.me() auth
 pnpm --filter @slark/server exec tsx scripts/verify-sdk-adapter.ts
 
-# 或带上 SDK 模式（仍不会真打 Cursor API，仅检查代码路径）
-SLARK_CURSOR_BACKEND=sdk pnpm --filter @slark/server exec tsx scripts/verify-sdk-adapter.ts
+# REST API 触发（server 已启动）：
+curl 'http://127.0.0.1:4179/api/settings/cursor?validate=true'
+
+# UI 触发：访问 http://localhost:4178/settings 点 "Save & Verify"
 ```
 
-### 9.4 选择策略建议
+三条路径共用同一份 `loadDotenv()` + `mergeUserSettings()` + `configureCursorRipgrep()`
++ `CursorSdkAdapter.checkInstallation()` 实现，结果一致。
+
+### 9.4 故障排查
+
+| 现象 | 可能原因 | 处理 |
+|------|---------|------|
+| `Team Architect returned unparseable output` | SDK stream 中间 assistant text block 是增量片段，被覆盖 | v1.2 已修：累加+`RunResult.result` 双源 |
+| `Ripgrep path not configured. Call configureRipgrepPath()` | pnpm `.pnpm` 间接路径 SDK 找不到 | v1.2 已修：`configureCursorRipgrep()` 启动时注入 `CURSOR_RIPGREP_PATH` |
+| `EADDRINUSE: address already in use 127.0.0.1:4179` | tsx watch 重启时旧进程未释放端口 | `pkill -9 -f "tsx watch"` 后重启 |
+| `no such column: channel_id` (旧用户升级) | v0 db 缺新列；schema.sql 里 INDEX 引用未补的列 | 删 `~/.slark/slark.db*` 让 schema 重建（开发期可以） |
+| Settings 页保存后 backend 仍是 cli | shell `export` 了 `SLARK_CURSOR_BACKEND=cli` 优先级最高 | `unset SLARK_CURSOR_BACKEND` 后重启 server |
+
+### 9.5 选择策略建议
 
 - **个人开发者 + 已装 cursor-agent** → 默认 `cli` 即可
 - **团队 / 服务部署 + 不想依赖 cursor-agent CLI** → `sdk`，统一用 API key 管理
@@ -520,3 +572,5 @@ SLARK_CURSOR_BACKEND=sdk pnpm --filter @slark/server exec tsx scripts/verify-sdk
 |------|------|------|
 | v1.0 | 2026-04-30 | 初版：基于 `cursor/cookbook` + `@cursor/sdk` public beta 文档调研，提出 `S-1` ~ `S-9` 9 个引入条目，附 Sprint 映射 |
 | v1.1 | 2026-04-30 | Sprint 4-ext 落地：`S-1` `CursorSdkAdapter` + `S-2` SDK schema + `S-3` `summarizeToolArgs`；接口增 `runDirect?` 钩子，`runWithAdapter` 统一 dispatcher；新增运维章节（§9）|
+| v1.2 | 2026-05-07 | 启用打通：仓库根 `.env` 加载（`load-env.ts`，零依赖）；`pnpm.onlyBuiltDependencies` 加入 `sqlite3` 免手动 `approve-builds`；verify 脚本增加真实 `Cursor.me()` auth check |
+| v1.3 | 2026-05-07 | 4 个根因修复 + UI 配置入口：(1) `configureCursorRipgrep()` 注入 SDK rg 路径；(2) `CursorSdkAdapter` 改为累加流式 assistant text，不再被增量片段覆盖；(3) 新增 `~/.slark/settings.json` + `mergeUserSettings()` 合并；(4) Settings 页 + REST `/api/settings/cursor`，UI 输入 API key + 切 backend + 实时 `Cursor.me()` 验证 |

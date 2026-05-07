@@ -11,9 +11,9 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
-import type { RuntimeDetection } from '@slark/shared';
-import { getRuntimes } from '../lib/api';
+import { Link, Navigate } from 'react-router-dom';
+import type { CursorBackendStatus, RuntimeDetection } from '@slark/shared';
+import { getCursorSettings, getRuntimes } from '../lib/api';
 import { useProjectsStore } from '../stores/projects';
 import { CreateProjectDialog } from '../components/CreateProjectDialog';
 import { projectIndexPath } from '../lib/routes';
@@ -22,14 +22,18 @@ export function WelcomePage() {
   const projects = useProjectsStore((s) => s.projects);
   const projectsLoaded = useProjectsStore((s) => s.loaded);
   const [runtimes, setRuntimes] = useState<RuntimeDetection[]>([]);
+  const [cursorBackend, setCursorBackend] = useState<CursorBackendStatus | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   useEffect(() => {
     void getRuntimes().then(setRuntimes).catch(() => {});
+    void getCursorSettings(false).then(setCursorBackend).catch(() => {});
   }, []);
 
   const cursor = runtimes.find((r) => r.id === 'cursor');
-  const cursorReady = cursor?.installed;
+  const cliReady = cursor?.installed;
+  const sdkReady = cursorBackend?.backend === 'sdk' && cursorBackend?.hasApiKey;
+  const cursorReady = cliReady || sdkReady;
 
   // 等 store 加载完成再判断（否则刷新会闪一下 CTA）
   if (!projectsLoaded) {
@@ -57,11 +61,37 @@ export function WelcomePage() {
 
         {!cursorReady && (
           <div className="mb-6 p-4 bg-accent-yellow border-2 border-black rounded">
-            <div className="font-bold mb-1">⚠ Cursor CLI not installed</div>
-            <div className="text-sm">
-              Install <code className="font-mono">cursor-agent</code> from Cursor IDE. You can still
-              create a project now; the Team Architect will show a default team and you can fill
-              in <span className="font-mono">runtime</span> after installing Cursor CLI.
+            <div className="font-bold mb-1">⚠ Cursor backend not configured</div>
+            <div className="text-sm space-y-1.5">
+              <div>选一种方式让 Slark 调用 Cursor：</div>
+              <ul className="list-disc list-inside space-y-0.5 text-[13px]">
+                <li>
+                  本机安装 <code className="font-mono">cursor-agent</code> 并登录（默认 CLI
+                  模式，零配置）
+                </li>
+                <li>
+                  或在{' '}
+                  <Link to="/settings" className="underline font-bold hover:text-accent-pink">
+                    Settings
+                  </Link>{' '}
+                  里配置 Cursor API key 切到 SDK 模式（无需安装 cursor-agent）
+                </li>
+              </ul>
+              <div className="text-[12px] text-text-secondary mt-1">
+                未配置也可以先创建 Project，Team Architect 会展示默认团队，配置好后再开始对话即可。
+              </div>
+            </div>
+          </div>
+        )}
+        {sdkReady && (
+          <div className="mb-6 p-4 bg-green-100 border-2 border-black rounded">
+            <div className="font-bold mb-0.5">✓ Cursor SDK ready</div>
+            <div className="text-[13px] text-text-secondary">
+              使用 <code className="font-mono">@cursor/sdk</code> 直连，
+              <Link to="/settings" className="underline ml-1 hover:text-accent-pink">
+                Settings
+              </Link>{' '}
+              里可切换 backend / 修改 API key。
             </div>
           </div>
         )}

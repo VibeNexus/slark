@@ -73,6 +73,11 @@ export async function suggestTeam(input: SuggestTeamInput): Promise<TeamSuggesti
 
     const parsed = parseTeamSuggestion(result.fullText);
     if (!parsed) {
+      // S-1 调试：打印 SDK / CLI 实际返回的前 800 字符 + 长度，定位 prompt-output mismatch
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[team-architect] unparseable output; fullText.length=${result.fullText.length}, head=${JSON.stringify(result.fullText.slice(0, 800))}`,
+      );
       return fallbackTeam('Team Architect returned unparseable output');
     }
     return { ...parsed, is_fallback: false };
@@ -113,7 +118,7 @@ function buildTeamArchitectPrompt(input: SuggestTeamInput): string {
     '      "role": "Architect",                // one-word role label',
     '      "description": "...",               // 1-3 sentences, written as the agent\'s system prompt in second person',
     '      "runtime": "cursor",                // always "cursor" for MVP',
-    '      "model": "composer-2-fast",         // default',
+    '      "model": "composer-2",              // valid: default / composer-2 / composer-1.5 (use "composer-2" as the safe default)',
     '      "reasoning": "medium"               // low / medium / high / xhigh',
     '    }',
     '  ],',
@@ -160,7 +165,7 @@ function parseTeamSuggestion(raw: string): Omit<TeamSuggestion, 'is_fallback'> |
     if (!name || !description) continue;
 
     const runtime = typeof a.runtime === 'string' ? a.runtime.trim() : 'cursor';
-    const model = typeof a.model === 'string' ? a.model.trim() : 'composer-2-fast';
+    const model = typeof a.model === 'string' ? a.model.trim() : 'composer-2';
     const reasoningRaw = typeof a.reasoning === 'string' ? a.reasoning.trim() : 'medium';
     const reasoning =
       reasoningRaw === 'low' ||
@@ -178,7 +183,7 @@ function parseTeamSuggestion(raw: string): Omit<TeamSuggestion, 'is_fallback'> |
       role: role || name,
       description,
       runtime: runtimeNormalized,
-      model: model || 'composer-2-fast',
+      model: model || 'composer-2',
       reasoning,
     });
   }

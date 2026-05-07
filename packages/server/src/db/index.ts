@@ -88,6 +88,22 @@ function migrate(db: DB): void {
   // CP8.3：从旧 db（v0 / v1.0.0~v1.0.1）删除 agents.status 字段
   // 状态改由 agent_runs 表派生，详见 docs/technical-decisions.md D-1。
   dropColumnIfExists(db, 'agents', 'status');
+
+  // Sprint 4-ext：把 cursor-agent CLI 时代的 model 别名规范化到 SDK 兼容 ID。
+  // SDK 严格只接受 Cursor.models.list() 返回的 ID，老数据会让 SDK 模式 spawn 全挂；
+  // SDK adapter 内部已有 alias fallback 兜底，但 db 里留着旧字符串影响 UI 显示，所以一并改。
+  normalizeAgentModelAliases(db);
+}
+
+function normalizeAgentModelAliases(db: DB): void {
+  const aliases: Array<[string, string]> = [
+    ['composer-2-fast', 'composer-2'],
+    ['composer-2-balanced', 'composer-2'],
+    ['auto', 'default'],
+  ];
+  for (const [from, to] of aliases) {
+    db.prepare('UPDATE agents SET model = ? WHERE model = ?').run(to, from);
+  }
 }
 
 function ensureColumn(db: DB, table: string, column: string, definition: string): void {

@@ -176,7 +176,7 @@ export function ChannelPage() {
               emptyHint={`No messages yet. Try "@${channelAgents[0]?.name ?? 'Agent'} hello".`}
             />
             <MessageInput
-              placeholder={`Message #${channel.name}`}
+              placeholder={`Message #${channel.name} — @AgentName 或 @all 触发响应`}
               onSend={send}
               commands={channelCommands}
             />

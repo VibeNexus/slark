@@ -132,6 +132,7 @@ export function buildContext(input: BuildContextInput): BuiltContext {
     `- Only @mention another agent when you explicitly need them to perform a concrete task or review.`,
     `- Never @mention the user to keep the conversation going — stop when you've answered.`,
     `- If you have nothing new to add or the conversation is resolved, keep your reply short and do not @mention anyone.`,
+    `- Never use \`@all\`, \`@everyone\`, \`@channel\`, or \`@所有人\` — these are reserved for the human user. If you need help, @ a specific agent by name.`,
   ];
 
   const prompt = sections.filter((s) => s !== '').join('\n');

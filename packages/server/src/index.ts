@@ -8,6 +8,19 @@
  *   Agent Engine   → agents/engine.ts + cursor-adapter.ts + runner.ts
  */
 
+// Sprint 4-ext：必须在 import config / 任何依赖 process.env 的模块之前加载 .env / settings.json，
+// 否则像 SLARK_CURSOR_BACKEND / CURSOR_API_KEY 这类后端切换变量在 import 时被读到的是 undefined。
+//
+// 优先级（后到不覆盖前到的）：
+//   1. shell export 的 env (loadDotenv 不动)
+//   2. .env (loadDotenv 注入)
+//   3. ~/.slark/settings.json (mergeUserSettings 注入)  ← UI 改这个
+//   4. defaults
+import { loadDotenv, mergeUserSettings, configureCursorRipgrep } from './load-env.js';
+const __envLoad = loadDotenv();
+const __settingsLoad = mergeUserSettings();
+const __rgConfig = configureCursorRipgrep();
+
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
@@ -22,6 +35,7 @@ import { channelRoutes } from './routes/channels.js';
 import { agentRoutes } from './routes/agents.js';
 import { taskRoutes } from './routes/tasks.js';
 import { runtimesRoutes } from './routes/runtimes.js';
+import { settingsRoutes } from './routes/settings.js';
 import { extraRoutes } from './routes/extras.js';
 import { feedbackRoutes } from './routes/feedback.js';
 import { intelligenceRoutes } from './routes/intelligence.js';
@@ -37,6 +51,29 @@ async function main() {
   const app = Fastify({
     logger: { level: config.logLevel },
   });
+
+  if (__envLoad.loaded) {
+    app.log.info(
+      { source: __envLoad.source, keys: __envLoad.keysApplied },
+      '[env] loaded .env file',
+    );
+  }
+  if (__settingsLoad.loaded) {
+    app.log.info(
+      { source: __settingsLoad.source, keys: __settingsLoad.keysApplied },
+      '[env] merged user settings.json',
+    );
+  }
+  if (__rgConfig.configured) {
+    if (!__rgConfig.alreadySet) {
+      app.log.info(
+        { CURSOR_RIPGREP_PATH: __rgConfig.path },
+        '[env] auto-configured Cursor SDK ripgrep path',
+      );
+    }
+  } else if (__rgConfig.reason && !__rgConfig.reason.startsWith('SLARK_CURSOR_BACKEND')) {
+    app.log.warn({ reason: __rgConfig.reason }, '[env] Cursor SDK ripgrep not located');
+  }
 
   await app.register(cors, {
     origin: [config.webOrigin, 'http://127.0.0.1:4178'],
@@ -102,6 +139,7 @@ async function main() {
   }));
 
   await runtimesRoutes(app);
+  await settingsRoutes(app);
   await projectRoutes(app, db);
   await channelRoutes(app, db);
   await agentRoutes(app, db);
