@@ -286,6 +286,8 @@ interface AgentRow {
   runtime: string;
   model: string | null;
   reasoning: string | null;
+  thinking: number | null;
+  context: string | null;
   env_vars_json: string | null;
   project_id: string | null;
   created_at: number;
@@ -300,6 +302,8 @@ function rowToAgent(r: AgentRow): Agent {
     runtime: r.runtime as Runtime,
     model: r.model,
     reasoning: r.reasoning as ReasoningEffort | null,
+    thinking: r.thinking === null ? null : r.thinking === 1,
+    context: r.context as Agent['context'],
     env_vars: r.env_vars_json ? (JSON.parse(r.env_vars_json) as Record<string, string>) : {},
     project_id: r.project_id,
     created_at: r.created_at,
@@ -332,15 +336,23 @@ export const agentRepo = {
       runtime: Runtime;
       model?: string | null;
       reasoning?: ReasoningEffort | null;
+      thinking?: boolean | null;
+      context?: Agent['context'];
       env_vars?: Record<string, string>;
       project_id?: string | null;
     },
   ): Agent {
     const id = input.id ?? nanoid();
     const ts = now();
+    const thinkingInt =
+      input.thinking === undefined || input.thinking === null
+        ? null
+        : input.thinking
+          ? 1
+          : 0;
     db.prepare(
-      `INSERT INTO agents (id, name, avatar, description, runtime, model, reasoning, env_vars_json, project_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO agents (id, name, avatar, description, runtime, model, reasoning, thinking, context, env_vars_json, project_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       input.name,
@@ -349,6 +361,8 @@ export const agentRepo = {
       input.runtime,
       input.model ?? null,
       input.reasoning ?? null,
+      thinkingInt,
+      input.context ?? null,
       input.env_vars ? JSON.stringify(input.env_vars) : null,
       input.project_id ?? null,
       ts,
@@ -361,6 +375,8 @@ export const agentRepo = {
       runtime: input.runtime,
       model: input.model ?? null,
       reasoning: input.reasoning ?? null,
+      thinking: input.thinking ?? null,
+      context: input.context ?? null,
       env_vars: input.env_vars ?? {},
       project_id: input.project_id ?? null,
       created_at: ts,
@@ -406,6 +422,14 @@ export const agentRepo = {
     if (patch.reasoning !== undefined) {
       fields.push('reasoning = ?');
       values.push(patch.reasoning);
+    }
+    if (patch.thinking !== undefined) {
+      fields.push('thinking = ?');
+      values.push(patch.thinking === null ? null : patch.thinking ? 1 : 0);
+    }
+    if (patch.context !== undefined) {
+      fields.push('context = ?');
+      values.push(patch.context);
     }
     if (patch.env_vars !== undefined) {
       fields.push('env_vars_json = ?');

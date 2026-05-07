@@ -70,6 +70,21 @@ export class CursorAdapter implements CLIAdapter {
     if (params.permissive) {
       args.push('-f');
     }
+    // Sprint 4-ext / Phase A：CLI 不支持 thinking / context / effort 单独传参
+    // （cursor-agent CLI 仅有 --model）；这些字段仅在 SDK 模式生效。
+    // 这里静默忽略；若用户期望生效，建议在 Settings 切到 SDK 后端。
+    if (params.thinking !== undefined && params.thinking !== null) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[cursor-cli] thinking is set but cursor-agent CLI does not support it; switch to SDK backend (SLARK_CURSOR_BACKEND=sdk) to apply.',
+      );
+    }
+    if (params.context) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[cursor-cli] context="${params.context}" is set but cursor-agent CLI does not support it; switch to SDK backend (SLARK_CURSOR_BACKEND=sdk) to apply.`,
+      );
+    }
     args.push(params.prompt);
 
     return {

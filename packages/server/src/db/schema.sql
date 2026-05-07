@@ -33,6 +33,10 @@ CREATE TABLE IF NOT EXISTS agents (
   runtime         TEXT NOT NULL,
   model           TEXT,
   reasoning       TEXT,
+  -- Sprint 4-ext / Phase A：对齐 Cursor IDE Options 面板的额外 model 维度。
+  -- thinking / context 通过 SDK ModelSelection.params 透传；CLI 模式下被忽略。
+  thinking        INTEGER,        -- 0/1/NULL；NULL=未设
+  context         TEXT,           -- '300k' | '1m' | NULL
   env_vars_json   TEXT,
   project_id      TEXT REFERENCES projects(id) ON DELETE CASCADE,
   created_at      INTEGER NOT NULL

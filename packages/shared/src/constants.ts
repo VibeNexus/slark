@@ -112,5 +112,18 @@ export type TaskStatus = (typeof TASK_STATES)[number];
 // =============================================================================
 // Reasoning effort
 // =============================================================================
-export const REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh'] as const;
+//
+// Sprint 4-ext (Phase B)：5 值与 Cursor IDE / SDK ModelSelection.params{id:"effort"} 命名空间对齐。
+// 旧 db 的 'xhigh' 字符串通过启动期 migration 自动迁移到 'extra-high'。
+export const REASONING_EFFORTS = ['low', 'medium', 'high', 'extra-high', 'max'] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+// =============================================================================
+// Context window size (Sprint 4-ext / Phase A)
+//
+// 对齐 Cursor IDE Options 面板的 Context 选项（300K / 1M）。SDK 通过
+// ModelSelection.params{id:"context"} 设置；不同 model 支持的 context 上限不同，
+// 写入 SDK 时由 CursorSdkAdapter 透传，错误参数会被 SDK 拒绝并触发 fallback。
+// =============================================================================
+export const CONTEXT_SIZES = ['300k', '1m'] as const;
+export type ContextSize = (typeof CONTEXT_SIZES)[number];

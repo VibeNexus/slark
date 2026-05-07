@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import type { Agent, AgentActivity, AgentFeedback, AgentStatus, ReasoningEffort } from '@slark/shared';
+import type { Agent, AgentActivity, AgentFeedback, AgentStatus, ContextSize, ReasoningEffort } from '@slark/shared';
 import { cn } from '../lib/cn';
 import {
   applyAgentFeedback,
@@ -418,6 +418,36 @@ function ProfileTab({
     const updated = await updateAgent(agent.id, { reasoning: v as ReasoningEffort });
     upsertAgent(updated);
   };
+  const saveThinking = async (v: 'on' | 'off' | 'auto') => {
+    const next = v === 'on' ? true : v === 'off' ? false : null;
+    const updated = await updateAgent(agent.id, { thinking: next });
+    upsertAgent(updated);
+  };
+  const saveContext = async (v: 'default' | ContextSize) => {
+    const next = v === 'default' ? null : v;
+    const updated = await updateAgent(agent.id, { context: next });
+    upsertAgent(updated);
+  };
+  // Phase B：MAX Mode 一键 preset = effort=max + thinking=on + context=1m
+  const applyMaxMode = async () => {
+    const updated = await updateAgent(agent.id, {
+      reasoning: 'max',
+      thinking: true,
+      context: '1m',
+    });
+    upsertAgent(updated);
+  };
+  // 关掉 MAX Mode → 回到 model 默认（Slark 不假设具体值，全置 null/medium）
+  const clearMaxMode = async () => {
+    const updated = await updateAgent(agent.id, {
+      reasoning: 'medium',
+      thinking: null,
+      context: null,
+    });
+    upsertAgent(updated);
+  };
+  const isMaxMode =
+    agent.reasoning === 'max' && agent.thinking === true && agent.context === '1m';
 
   return (
     <div className="p-4 space-y-5">
@@ -448,8 +478,23 @@ function ProfileTab({
       </ProfileField>
 
       <div className="border-t-2 border-black/30 pt-4">
-        <div className="section-header mb-3">INFO</div>
-        <div className="flex gap-4 flex-wrap">
+        <div className="flex items-center justify-between mb-3">
+          <div className="section-header">INFO</div>
+          <button
+            type="button"
+            onClick={() => void (isMaxMode ? clearMaxMode() : applyMaxMode())}
+            className={cn(
+              'text-[11px] font-mono px-2 py-1 border-2 border-black rounded',
+              isMaxMode
+                ? 'bg-accent-pink font-bold shadow-[2px_2px_0_0_#000]'
+                : 'bg-bg-card hover:bg-accent-yellow',
+            )}
+            title={isMaxMode ? '关闭 MAX Mode（回到默认 medium / off / default）' : '一键开启 MAX：effort=max + thinking=on + context=1m'}
+          >
+            {isMaxMode ? '✓ MAX Mode' : '🚀 MAX Mode'}
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
           <InfoTag label="Runtime" value={agent.runtime} color="teal" />
           <ModelEditTag
             agentRuntime={agent.runtime}
@@ -457,6 +502,8 @@ function ProfileTab({
             onSave={saveModel}
           />
           <ReasoningEditTag value={agent.reasoning ?? 'medium'} onSave={saveReasoning} />
+          <ThinkingEditTag value={agent.thinking ?? null} onSave={saveThinking} />
+          <ContextEditTag value={agent.context ?? null} onSave={saveContext} />
         </div>
         <div className="mt-4">
           <div className="text-xs text-text-secondary font-mono">Born</div>
@@ -764,7 +811,7 @@ function ReasoningEditTag({
 }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const options: ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+  const options: ReasoningEffort[] = ['low', 'medium', 'high', 'extra-high', 'max'];
 
   const onChange = async (next: string) => {
     if (next === value) {
@@ -822,6 +869,144 @@ function ReasoningEditTag({
 function mergeOptions(list: string[], current: string): string[] {
   if (!current) return list;
   return list.includes(current) ? list : [current, ...list];
+}
+
+/**
+ * Sprint 4-ext / Phase A：Thinking 三态切换。
+ * - `auto`（null）= 跟 model 默认
+ * - `on` / `off` 显式覆盖
+ *
+ * SDK 模式下生效；CLI 模式被 cursor-agent 忽略 + 启动期 warn（详见 cursor-adapter.ts）。
+ */
+function ThinkingEditTag({
+  value,
+  onSave,
+}: {
+  value: boolean | null;
+  onSave: (v: 'on' | 'off' | 'auto') => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const current: 'on' | 'off' | 'auto' = value === true ? 'on' : value === false ? 'off' : 'auto';
+  const display = current === 'on' ? '✓ on' : current === 'off' ? '✗ off' : 'auto';
+
+  const onChange = async (next: 'on' | 'off' | 'auto') => {
+    if (next === current) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(next);
+    } finally {
+      setSaving(false);
+      setEditing(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div>
+        <div className="text-xs text-text-secondary font-mono mb-1">Thinking</div>
+        <select
+          autoFocus
+          disabled={saving}
+          value={current}
+          onChange={(e) => void onChange(e.target.value as 'on' | 'off' | 'auto')}
+          onBlur={() => setEditing(false)}
+          className="px-2 py-1 border-2 border-black rounded font-mono text-sm bg-accent-teal"
+        >
+          <option value="auto">auto (model default)</option>
+          <option value="on">on</option>
+          <option value="off">off</option>
+        </select>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      className="block text-left group"
+      title="Click to toggle thinking mode"
+    >
+      <div className="text-xs text-text-secondary font-mono mb-1 group-hover:text-text-primary">
+        Thinking ✎
+      </div>
+      <span className="inline-block px-2 py-1 border-2 border-black rounded font-mono text-sm bg-accent-teal group-hover:brightness-105">
+        {display}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * Sprint 4-ext / Phase A：Context 大小（300K / 1M / default）。
+ *
+ * 不同 model 支持的最大 context 不同；用户选了 model 不支持的值时 SDK 会拒绝并触发
+ * adapter 内部的 default fallback（详见 cursor-sdk-adapter.ts）。
+ */
+function ContextEditTag({
+  value,
+  onSave,
+}: {
+  value: ContextSize | null;
+  onSave: (v: 'default' | ContextSize) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const current = value ?? 'default';
+
+  const onChange = async (next: 'default' | ContextSize) => {
+    if (next === current) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(next);
+    } finally {
+      setSaving(false);
+      setEditing(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div>
+        <div className="text-xs text-text-secondary font-mono mb-1">Context</div>
+        <select
+          autoFocus
+          disabled={saving}
+          value={current}
+          onChange={(e) => void onChange(e.target.value as 'default' | ContextSize)}
+          onBlur={() => setEditing(false)}
+          className="px-2 py-1 border-2 border-black rounded font-mono text-sm bg-accent-yellow"
+        >
+          <option value="default">default (model default)</option>
+          <option value="300k">300K</option>
+          <option value="1m">1M</option>
+        </select>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      className="block text-left group"
+      title="Click to change context window size"
+    >
+      <div className="text-xs text-text-secondary font-mono mb-1 group-hover:text-text-primary">
+        Context ✎
+      </div>
+      <span className="inline-block px-2 py-1 border-2 border-black rounded font-mono text-sm bg-accent-yellow group-hover:brightness-105">
+        {current === 'default' ? 'default' : current.toUpperCase()}
+      </span>
+    </button>
+  );
 }
 
 function IconButton({

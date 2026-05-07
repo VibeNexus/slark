@@ -12,7 +12,7 @@
  */
 
 import { TEAM_ARCHITECT_TIMEOUT_MS } from '@slark/shared';
-import type { TeamSuggestion, TeamSuggestionAgent } from '@slark/shared';
+import type { ReasoningEffort, TeamSuggestion, TeamSuggestionAgent } from '@slark/shared';
 import { createCursorAdapter } from '../agents/adapter-factory.js';
 import { runWithAdapter } from '../agents/runner.js';
 
@@ -119,7 +119,7 @@ function buildTeamArchitectPrompt(input: SuggestTeamInput): string {
     '      "description": "...",               // 1-3 sentences, written as the agent\'s system prompt in second person',
     '      "runtime": "cursor",                // always "cursor" for MVP',
     '      "model": "composer-2",              // valid: default / composer-2 / composer-1.5 (use "composer-2" as the safe default)',
-    '      "reasoning": "medium"               // low / medium / high / xhigh',
+    '      "reasoning": "medium"               // low / medium / high / extra-high / max',
     '    }',
     '  ],',
     '  "rationale": "one paragraph explaining why this team fits the goal"',
@@ -166,14 +166,18 @@ function parseTeamSuggestion(raw: string): Omit<TeamSuggestion, 'is_fallback'> |
 
     const runtime = typeof a.runtime === 'string' ? a.runtime.trim() : 'cursor';
     const model = typeof a.model === 'string' ? a.model.trim() : 'composer-2';
+    // Phase B：reasoning 5 值；老 LLM 输出可能仍写 'xhigh'，在此 normalize 到 'extra-high'。
     const reasoningRaw = typeof a.reasoning === 'string' ? a.reasoning.trim() : 'medium';
-    const reasoning =
+    const reasoning: ReasoningEffort =
       reasoningRaw === 'low' ||
       reasoningRaw === 'medium' ||
       reasoningRaw === 'high' ||
-      reasoningRaw === 'xhigh'
+      reasoningRaw === 'extra-high' ||
+      reasoningRaw === 'max'
         ? reasoningRaw
-        : 'medium';
+        : reasoningRaw === 'xhigh'
+          ? 'extra-high'
+          : 'medium';
 
     // 只接受 'cursor' 或 '' 作为 MVP runtime；其他置 'cursor'
     const runtimeNormalized = runtime === 'cursor' ? 'cursor' : 'cursor';

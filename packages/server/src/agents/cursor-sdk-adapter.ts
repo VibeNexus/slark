@@ -62,6 +62,28 @@ function isUnknownModelError(err: Error): boolean {
   return /Cannot use this model/i.test(err.message);
 }
 
+/**
+ * Sprint 4-ext / Phase A：把 Slark Agent 的 thinking / context / reasoning 字段
+ * 拼成 SDK ModelSelection.params 数组（仅当用户显式设置才 emit，跟随 model 默认 → 不 emit）。
+ *
+ * SDK 会在 model 不支持某个 param 时报错（"unsupported parameter ..."）；目前我们直接透传，
+ * 后续可以基于 Cursor.models.list().parameters cache 做客户端校验过滤，但当前的 try/catch
+ * fallback 已经覆盖严重失败场景。
+ */
+function buildModelParams(params: BuildCommandParams): Array<{ id: string; value: string }> {
+  const out: Array<{ id: string; value: string }> = [];
+  if (params.reasoning && params.reasoning !== '') {
+    out.push({ id: 'effort', value: params.reasoning });
+  }
+  if (params.thinking !== undefined && params.thinking !== null) {
+    out.push({ id: 'thinking', value: params.thinking ? 'on' : 'off' });
+  }
+  if (params.context) {
+    out.push({ id: 'context', value: params.context });
+  }
+  return out;
+}
+
 let _sdkPromise: Promise<SdkModule> | null = null;
 async function loadSdk(): Promise<SdkModule> {
   if (!_sdkPromise) {
@@ -194,22 +216,29 @@ export class CursorSdkAdapter implements CLIAdapter {
       // 模型 ID 解析 + auto-fallback：SDK 拒绝的 model 自动重试 'default'，让用户的 agent
       // 总能跑起来（哪怕配了一个 SDK 不识别的 ID，也只是降级到 default），不再硬挂。
       const requestedModel = normalizeModelId(params.model);
+      const modelParams = buildModelParams(params);
       let actualModel = requestedModel;
       try {
         agent = await sdk.Agent.create({
           apiKey,
-          model: { id: requestedModel },
+          model: {
+            id: requestedModel,
+            ...(modelParams.length > 0 ? { params: modelParams } : {}),
+          },
           ...(params.workingDirectory ? { local: { cwd: params.workingDirectory } } : {}),
         });
       } catch (e) {
         const err = e as Error;
         if (isUnknownModelError(err) && requestedModel !== 'default') {
-          // 第二次机会：用 default 再试
+          // 第二次机会：用 default 再试（保留 params；SDK 通常会忽略不支持的）
           actualModel = 'default';
           try {
             agent = await sdk.Agent.create({
               apiKey,
-              model: { id: 'default' },
+              model: {
+                id: 'default',
+                ...(modelParams.length > 0 ? { params: modelParams } : {}),
+              },
               ...(params.workingDirectory ? { local: { cwd: params.workingDirectory } } : {}),
             });
             // 软警告事件 + 继续 — 不阻断

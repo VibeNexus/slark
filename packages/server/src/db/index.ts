@@ -11,6 +11,7 @@
  *   7 - v1.0 Sprint 5 CP1：新增 agent_observations / agent_feedback 表（D-20 Evolution Loop）
  *   8 - v1.0 Sprint 6 CP1：新增 project_onboarding / agent_skills 表（D-20 Onboarding + Reuse）
  *   9 - v1.0 Sprint 7 CP1：新增 workflow_sessions 表（D-15 Facilitator）
+ *  10 - Sprint 4-ext Phase A：agents 表加 thinking / context 列；reasoning 'xhigh' → 'extra-high'
  */
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -28,7 +29,7 @@ const SCHEMA_CANDIDATES = [
 ];
 const SCHEMA_PATH = SCHEMA_CANDIDATES.find((p) => existsSync(p));
 
-const CURRENT_SCHEMA_VERSION = '9';
+const CURRENT_SCHEMA_VERSION = '10';
 
 let _db: DB | null = null;
 
@@ -89,10 +90,16 @@ function migrate(db: DB): void {
   // 状态改由 agent_runs 表派生，详见 docs/technical-decisions.md D-1。
   dropColumnIfExists(db, 'agents', 'status');
 
+  // Sprint 4-ext Phase A：补 thinking / context 列（schema v10）
+  ensureColumn(db, 'agents', 'thinking', 'INTEGER');
+  ensureColumn(db, 'agents', 'context', 'TEXT');
+
   // Sprint 4-ext：把 cursor-agent CLI 时代的 model 别名规范化到 SDK 兼容 ID。
   // SDK 严格只接受 Cursor.models.list() 返回的 ID，老数据会让 SDK 模式 spawn 全挂；
   // SDK adapter 内部已有 alias fallback 兜底，但 db 里留着旧字符串影响 UI 显示，所以一并改。
   normalizeAgentModelAliases(db);
+  // Sprint 4-ext Phase B：reasoning 'xhigh' → 'extra-high'（与 SDK / IDE 命名空间对齐）
+  normalizeReasoningAliases(db);
 }
 
 function normalizeAgentModelAliases(db: DB): void {
@@ -103,6 +110,15 @@ function normalizeAgentModelAliases(db: DB): void {
   ];
   for (const [from, to] of aliases) {
     db.prepare('UPDATE agents SET model = ? WHERE model = ?').run(to, from);
+  }
+}
+
+function normalizeReasoningAliases(db: DB): void {
+  const aliases: Array<[string, string]> = [
+    ['xhigh', 'extra-high'],
+  ];
+  for (const [from, to] of aliases) {
+    db.prepare('UPDATE agents SET reasoning = ? WHERE reasoning = ?').run(to, from);
   }
 }
 

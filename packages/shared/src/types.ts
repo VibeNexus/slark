@@ -8,6 +8,7 @@
  */
 
 import type {
+  ContextSize,
   ReasoningEffort,
   Runtime,
   SenderType,
@@ -59,6 +60,16 @@ export interface Agent {
   runtime: Runtime;
   model: string | null;
   reasoning: ReasoningEffort | null;
+  /**
+   * Sprint 4-ext / Phase A：Cursor SDK ModelSelection.params{id:"thinking"} 开关。
+   * `null` = 跟 model 默认；`true/false` 显式覆盖。CLI 模式忽略 + 运行期 warn。
+   */
+  thinking: boolean | null;
+  /**
+   * Sprint 4-ext / Phase A：Cursor SDK ModelSelection.params{id:"context"} —— '300k' / '1m'。
+   * `null` = 跟 model 默认。Cursor IDE Options 面板对齐项。
+   */
+  context: ContextSize | null;
   env_vars: Record<string, string>;
   /**
    * v1.0 新增：归属 Project（D-13）。

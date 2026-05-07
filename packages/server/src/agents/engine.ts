@@ -258,6 +258,8 @@ export async function triggerAgent(
         prompt: built.prompt,
         model: agent.model,
         reasoning: agent.reasoning,
+        thinking: agent.thinking,
+        context: agent.context,
         workingDirectory: cwd,
         envVars: agent.env_vars,
         permissive: true,

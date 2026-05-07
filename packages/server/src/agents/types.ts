@@ -85,6 +85,16 @@ export interface BuildCommandParams {
   prompt: string;
   model?: string | null;
   reasoning?: string | null;
+  /**
+   * Sprint 4-ext / Phase A：Cursor SDK ModelSelection.params{id:"thinking"} 透传。
+   * `null` / `undefined` = 跟 model 默认；CLI 模式下被忽略 + warn。
+   */
+  thinking?: boolean | null;
+  /**
+   * Sprint 4-ext / Phase A：Cursor SDK ModelSelection.params{id:"context"} 透传。
+   * `null` / `undefined` = 跟 model 默认。CLI 模式下被忽略 + warn。
+   */
+  context?: '300k' | '1m' | null;
   workingDirectory?: string;
   envVars?: Record<string, string>;
   stdinContext?: string;
