@@ -1,10 +1,14 @@
 # Per-Project Storage 设计文档
 
-> **状态**：设计中（未实施）
-> **预估工期**：~9 工作日（Sprint A 3d + B 3d + C 3d）
+> **状态**：设计完成 + Q-10~14 已决议，等待 Sprint A 启动
+> **预估工期**：~5 工作日（Sprint A 2d + B 1d + C 2d）
 > **关联决策**：`D-13`（Project 一等公民）/ `S-5`（数据本地化）/ `D-18`（per-channel 状态派生）/ `D-1`（Agent 状态派生）
 > **新增决策**：`D-21` ~ `D-25`（见 §11）
-> **新增待决议**：`Q-10` ~ `Q-14`（见 §12）
+> **决议状态**：Q-10 ~ Q-14 全部决议（2026-05-08，见 §10）
+>
+> **重要前提（v0.3）**：项目处于开发阶段，**无需考虑向前兼容，历史数据可清**。
+> 因此本文档不再保留 migration 工具、feature flag、Central/PerProject 双实现等
+> 防御性设计 — 直接重写 repos 为 per-project，YAGNI 原则。
 >
 > 本文档对应分支 `feat/per-project-storage`，未合到 `main`。
 
@@ -160,75 +164,77 @@ WebSocket 推送：
 
 **性能预估**：用户开 10 个项目 → 10 次 SQL query，每次 < 5ms → 总开销 < 50ms。可接受。
 
-### 4.2 数据迁移工具
+### 4.2 现有数据处理（开发阶段）
 
-**输入**：`~/.slark/slark.db`（含所有 project 数据）
-**输出**：`<each_project.workspace_path>/.slark/{project.json, slark.db, knowledge/, ...}`
+**v0.3 简化**：项目处于开发阶段，**不写 migration 工具，直接清掉旧数据**。
 
-**算法**：
-
+启动期检测：
 ```
-1. 读 ~/.slark/slark.db
-2. SELECT * FROM projects → 拿到 path 列表
-3. for each project p:
-   a. mkdir -p p.workspace_path/.slark/knowledge p.workspace_path/.slark/observations
-   b. 写 p.workspace_path/.slark/project.json (从 projects 行)
-   c. 创建 p.workspace_path/.slark/slark.db
-   d. 跨 db ATTACH + INSERT SELECT WHERE project_id = p.id 拷贝相关行
-      （channels / agents / messages / tasks / workflows / workflow_runs /
-       responsibilities / agent_feedback / workflow_sessions / agent_runs / agent_activity）
-   e. 把 decisions / lessons 写成 knowledge/*.jsonl
-   f. 把 agent_observations 写成 observations/*.jsonl
-   g. 把 agent_skills 写成 skills/agent_skills.json
-   h. 把 project_onboarding 写成 knowledge/onboarding.json
-   i. 写 .slark/.gitignore
-4. 备份原 db 为 ~/.slark/slark.db.backup-<timestamp>
-5. 写 ~/.slark/projects.json 列表
-6. 启动 server（PerProjectStorage 模式）→ 验证可读
+if (~/.slark/slark.db 存在 && ~/.slark/projects.json 不存在):
+  log.warn(`检测到旧版集中存储 db (~/.slark/slark.db)。
+           Slark 已切到 per-project storage（数据存在 <workspace>/.slark/）。
+           旧数据不会被自动迁移；如需保留请手动备份后删除。`)
+  // 不阻塞启动；用户自行处理
 ```
 
-**安全保障**：
-- 备份文件不删，用户可手动回滚到 CentralStorage 模式
-- 迁移失败不动原 db
-- 提供 `slark migrate-to-per-project --dry-run` 先看会做什么
+用户操作建议：
+```bash
+mv ~/.slark/slark.db ~/.slark/slark.db.legacy-<date>   # 想留作备份
+# 或
+rm ~/.slark/slark.db                                   # 直接清
+```
 
-### 4.3 ProjectStorage 抽象（Sprint A 核心）
+随后用户在 UI Open Project 时：在该 workspace 内新建 `.slark/`，
+重新 build team / 触发 onboarder。**所有团队定义 / 沉淀从零开始**，符合开发阶段定位。
 
-把"读写哪张表"的逻辑抽出到接口，主代码只依赖接口。
+### 4.3 直接重写 storage（不抽接口）
 
+**v0.3 简化**：YAGNI 原则。不会有第二个 storage 实现需要并存，所以**不抽 ProjectStorage 接口**，
+直接重写 `db/index.ts` + `db/repos.ts` 为 per-project handle 形态。
+
+新实现思路：
 ```typescript
-// packages/server/src/storage/types.ts
-export interface ProjectStorage {
-  /** 打开 / 创建 project，返回所有相关 repo */
-  openProject(workspacePath: string): Promise<ProjectHandle>;
-  /** 关闭 project（释放 db handle） */
-  closeProject(projectId: string): Promise<void>;
-  /** 列出所有可访问的 project */
-  listProjects(): Promise<ProjectMeta[]>;
-  /** 删除 project（per-project storage = rm -rf .slark/） */
-  deleteProject(projectId: string): Promise<void>;
+// packages/server/src/db/index.ts（重写）
+import Database from 'better-sqlite3';
+
+const handlePool = new Map<string, Database.Database>();
+
+export function openProjectDb(workspacePath: string): Database.Database {
+  if (handlePool.has(workspacePath)) {
+    return handlePool.get(workspacePath)!;
+  }
+  const dbPath = path.join(workspacePath, '.slark', 'slark.db');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new Database(dbPath);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+  applyPerProjectSchema(db);
+  handlePool.set(workspacePath, db);
+  return db;
 }
 
-export interface ProjectHandle {
-  projectId: string;
-  meta: ProjectMeta;
-  // repo 接口与现状保持一致，只是底层切换
-  channelRepo: ChannelRepo;
-  agentRepo: AgentRepo;
-  messageRepo: MessageRepo;
-  // ...
-  knowledgeRepo: KnowledgeRepo; // 替代 decisionRepo + lessonRepo
+export function closeProjectDb(workspacePath: string): void {
+  const db = handlePool.get(workspacePath);
+  if (db) {
+    db.close();
+    handlePool.delete(workspacePath);
+  }
 }
-
-// 实现 1：当前的中心 db（CentralStorage）
-export class CentralProjectStorage implements ProjectStorage { ... }
-
-// 实现 2：新方案
-export class PerProjectStorage implements ProjectStorage { ... }
 ```
 
-**Feature flag**：环境变量 `SLARK_STORAGE=central|per-project`（默认 `central`），
-切换 PerProjectStorage 默认前提是迁移工具跑过。
+`repos.ts` 里所有函数从 `(db: Database, ...)` 不变，调用方改为传 per-project handle
+（一般通过 route middleware 注入）。
+
+route handlers 改造：
+```typescript
+// 旧：app.get('/api/channels', async (req) => { return channelRepo.list(db); });
+// 新：app.get('/api/channels', async (req) => {
+//       const project = resolveProjectFromRequest(req);  // 从 query 或 path
+//       return channelRepo.list(project.db);
+//     });
+```
+
+全局视图（如 `/inbox`）遍历 handle pool 聚合。
 
 ### 4.4 多 db 并发 / 句柄管理
 
@@ -314,55 +320,75 @@ API 表面**不变**（仍是 `/api/channels`、`/api/agents` 等），只是底
 
 ---
 
-## 6. Sprint 拆解
+## 6. Sprint 拆解（v0.3 — 5 工作日）
 
-### Sprint A — Storage 抽象（3d）
+> **简化原则**：不抽接口、不写 migration、不留 feature flag。直接重写 + 替换。
 
-**目标**：抽出接口，CentralStorage 与 PerProjectStorage 并存，feature flag 切换。
-**不破坏功能**：默认 central，所有现有测试通过。
+### Sprint A — Per-Project Storage 重写（2d）
 
-任务：
-1. `packages/server/src/storage/types.ts` — 接口定义
-2. `packages/server/src/storage/central.ts` — 把现有 `db/repos.ts` 包装成 CentralStorage
-3. `packages/server/src/storage/per-project.ts` — 实现 PerProjectStorage（首版仅
-   project.json + slark.db，knowledge/observations 后置）
-4. `index.ts` 启动期根据 `SLARK_STORAGE` 选实现注入到所有 routes
-5. 单元测试（如果有时间）：两个实现跑同一组用例
-
-**验收**：`SLARK_STORAGE=per-project pnpm dev` 能启动空 server；
-`POST /api/projects/open` 能在 `<path>/.slark/` 创建文件夹 + project.json + slark.db。
-
-### Sprint B — Migration + Per-Project 默认（3d）
-
-**目标**：现有 `~/.slark/slark.db` 用户能一键迁移到 per-project；新用户默认走 per-project。
+**目标**：核心数据从 `~/.slark/slark.db` 切到 `<workspace>/.slark/slark.db`。
+**完成后状态**：旧 db 不再被读；所有 repo 通过 per-project handle 访问。
 
 任务：
-1. `packages/server/scripts/migrate-to-per-project.ts` — 数据迁移脚本（含 dry-run）
-2. 启动期检测：如果 `SLARK_STORAGE=per-project` 且 `~/.slark/slark.db` 存在 +
-   `~/.slark/projects.json` 不存在 → 提示用户跑 migration（或 server 拒绝启动 + 给清单）
-3. WelcomePage / OpenProjectDialog 走新流程：检测 `<path>/.slark/` 已存在 → 复用；否则新建
-4. settings.json 加 `"storage": "per-project"`，server 启动时读取
-5. 文档：在 README + cursorsdkadapter.md / project-status.md 写迁移指南
+1. **db handle pool**：`db/index.ts` 重写，按 workspace_path 维护连接池（LRU max=20，30min idle close）
+2. **schema 改造**：`schema.sql` 移除 `projects` 表（项目元数据存 `project.json`），其余表保留；
+   schema_version 重置 / 重命名为 `project-schema-v1`（per-project 内部版本，与全局 v10 解耦）
+3. **repos 改造**：所有 `repo.foo(db, ...)` 调用方改为传 per-project db handle；
+   移除所有 `WHERE project_id = ?` 过滤（per-project db 内本来就只有一个项目的数据）
+4. **route middleware**：新增 `resolveProject(req)` helper，从 query/path/body 解析 workspace_path
+   → openProjectDb()
+5. **`~/.slark/projects.json` 维护**：新增 `globalProjectsRepo`（普通 JSON 文件读写）
+6. **POST /api/projects/open** 替代 POST /api/projects：检查 `<path>/.slark/` 是否存在 →
+   存在则读 `project.json`；否则 mkdir + 初始化 + 写 `project.json` + 创建 `.gitignore`
+7. **DELETE /api/projects/:id** 改为"Close project"（仅从 projects.json 移除 + close handle）
+8. **POST /api/projects/:id/delete-storage** 新增：rm -rf `<workspace>/.slark/`，要求二次确认（Q-11 决议）
 
-**验收**：现有 finClaw + 测试 project 数据成功迁移到各自仓库；可正常打开使用；旧 db backup 完好。
+**验收**：
+- 启动 server 不读旧 `~/.slark/slark.db`
+- Open Project Dialog 输入新路径 → `<path>/.slark/` 自动创建 + project.json + slark.db schema 完整
+- 在 channel 内 @ agent 对话能正常 spawn / 持久化到 per-project db
 
-### Sprint C — 全局视图聚合 + Knowledge JSONL + git 集成（3d）
+**不在范围**：knowledge JSONL 改造（保留在 per-project SQLite，Sprint C 再迁）；
+全局视图聚合（Sprint C）；`.gitignore` 自动写（Sprint C）。
 
-**目标**：把 `decisions` / `lessons` 等 knowledge 表迁到 JSONL；`/inbox` `/threads` `/tasks`
-跨 project 聚合；自动写 `.gitignore`。
+### Sprint B — Project 管理 UX 改造（1d）
+
+**目标**：UI 完整对齐"open folder"心智。
 
 任务：
-1. `KnowledgeStore` 实现（JSONL 读写 + indexBuild）
-2. `/api/inbox` `/api/threads` `/api/tasks` 改为遍历 open projects 聚合
-3. WS 全局事件 broadcast（inbox 变化等）
-4. `<workspace>/.slark/.gitignore` 自动写入 + 提示用户提交 `project.json` / `knowledge/`
-5. `.slark/README.md` 自动生成解释结构（用户打开仓库能看懂）
-6. ProjectSettingsPage Danger Zone 改为"Close project (keep .slark/)" + "Delete .slark/"
+1. **Welcome / Sidebar 入口**：移除"创建 project（含 build team）"路径；统一走 OpenProjectDialog
+2. **Open Project Dialog 增强**：检测 `<path>/.slark/` 已存在时显示"重新打开"vs"新建"
+3. **ProjectSettingsPage Danger Zone 改造（Q-11 决议）**：
+   - **Close project**：灰色按钮 + 一键确认 → 仅从 recent 移除
+   - **Delete .slark/**：红色按钮 + 输入项目名验证 → rm -rf `<workspace>/.slark/`
+4. **Sidebar Switcher**：⋯ 菜单加 "Close" 项（与 Settings 并列）
+5. **重名处理**：OpenProjectDialog 在 ensureUniqueName 时检查 `~/.slark/projects.json`
+   既有路径，重名追加 `-2`（Q-12 决议）
+
+**验收**：
+- 旧路径 + 已有 .slark/ 的 project Open 时无重复创建
+- Close vs Delete 两条路径都正常工作
+- 同名 workspace_path 不会创建第二个 project
+
+### Sprint C — 全局视图 + Knowledge JSONL + git 集成（2d）
+
+**目标**：跨 project 聚合视图 + knowledge git-friendly 化 + 自动 `.gitignore`。
+
+任务：
+1. **`KnowledgeStore` 实现**：`decisions.jsonl` / `lessons.jsonl` 读写（覆盖式 simpler 版，
+   每次操作整体重写文件 — Q-13 简化版决议）
+2. **`/api/inbox` `/api/threads` `/api/tasks` 跨 project 聚合**：遍历 handle pool +
+   合并排序返回（性能预算 < 100ms / 10 项目）
+3. **`<workspace>/.slark/.gitignore` 自动生成**：默认排 `slark.db` / `observations/`，
+   推荐入库 `project.json` / `knowledge/`
+4. **`.slark/README.md` 自动生成**：解释 `.slark/` 结构与 git 策略
+5. **WS 广播**：knowledge / inbox 变化跨 project 推送（订阅"全局事件"通道）
+6. **`docs/project-status.md` Sprint 标记 + `docs/technical-decisions.md` D-21~D-25 增补**
 
 **验收**：
 - 完整端到端：open folder → 写 .slark/ → build team → @ agent 对话 → workflow trigger →
   `/inbox` 看到 → `/sediment` 写 lessons.jsonl → git diff 能看到改动
-- 全局视图（`/inbox`）正确聚合多个 open project 的数据
+- `.gitignore` 自动写入；`project.json` + `knowledge/` 推荐入库的提示出现在 README
 
 ---
 
@@ -381,10 +407,10 @@ API 表面**不变**（仍是 `/api/channels`、`/api/agents` 等），只是底
 
 | # | 风险 | 严重度 | 应对 |
 |---|------|--------|------|
-| R-1 | 迁移脚本 bug 导致数据丢失 | 🔴 高 | dry-run + 备份 + 详细 log |
+| ~~R-1~~ | ~~迁移脚本 bug 导致数据丢失~~ | — | **v0.3 删除**：开发阶段无 migration，旧数据手动清 |
 | R-2 | 多 db handle 句柄爆炸 | 🟡 中 | LRU 句柄池 + 30min idle close |
 | R-3 | 全局视图性能下降 | 🟡 中 | 性能测：10 project / 1000 messages 每个 → < 100ms |
-| R-4 | 用户已 git push 中心 db backup → 隐私泄露 | 🟢 低 | `.slark/.gitignore` 默认排 slark.db；文档强提示 |
+| R-4 | 用户 `git push` 把含个人对话的 slark.db 提交 | 🟢 低 | `.slark/.gitignore` 默认排 slark.db；自动 README 提示 |
 | R-5 | 多 server 实例打开同 project（远期 cloud） | 🟢 低 | SQLite WAL + per-process lock；MVP 不考虑 |
 
 ---
@@ -444,10 +470,12 @@ API 表面**不变**（仍是 `/api/channels`、`/api/agents` 等），只是底
 ## 11. 实施前最终 checklist
 
 - [x] Q-10 ~ Q-14 全部决议（user signoff 2026-05-08）
-- [ ] 备份现有 `~/.slark/slark.db` 到 `~/.slark/slark.db.backup-<date>`（Sprint B 启动前）
 - [x] feature/per-project-storage 分支已开
-- [ ] 文档同步到 `docs/project-status.md` Sprint 标记（待 Sprint A 启动时）
-- [ ] `docs/technical-decisions.md` D-21 ~ D-25 增补（待 Sprint A 启动时）
+- [x] **开发阶段无需向前兼容确认**（user signoff 2026-05-08）— 不写 migration / 不留 feature flag
+- [ ] 文档同步到 `docs/project-status.md` Sprint 标记（待 Sprint C 收尾时统一同步）
+- [ ] `docs/technical-decisions.md` D-21 ~ D-25 增补（待 Sprint C 收尾时统一同步）
+
+> 旧 db `~/.slark/slark.db` 用户自行 `mv` 备份或 `rm` 清掉，server 启动期检测到只 warn 不阻塞。
 
 ---
 
@@ -457,3 +485,4 @@ API 表面**不变**（仍是 `/api/channels`、`/api/agents` 等），只是底
 |------|------|------|
 | v0.1 | 2026-05-08 | 初版设计：背景 / 目标态 / 数据归属表 / Sprint 拆解 / Q-10~14 |
 | v0.2 | 2026-05-08 | Q-10~14 全部决议（user signoff），新增 §10.1 Close vs Delete 双 dialog 设计 |
+| v0.3 | 2026-05-08 | 开发阶段简化：删 migration / 不抽 ProjectStorage 接口 / 无 feature flag；工期 9d → 5d；§4.2 重写 / §4.3 重写 / §6 重写 / §8 R-1 删除 / §11 checklist 更新 |
