@@ -12,6 +12,8 @@ import { useEffect, useRef, useState } from 'react';
 import { NavLink, useSearchParams, useNavigate } from 'react-router-dom';
 import type { Agent, Channel, Project } from '@slark/shared';
 import { cn } from '../lib/cn';
+import { closeProject } from '../lib/api';
+import { useProjectsStore } from '../stores/projects';
 import {
   projectAgentProfilePath,
   projectChannelPath,
@@ -413,6 +415,7 @@ function ProjectSwitcher({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  const refreshProjects = useProjectsStore((s) => s.refresh);
 
   useEffect(() => {
     if (!open) return;
@@ -460,6 +463,18 @@ function ProjectSwitcher({
                   setOpen(false);
                   navigate(projectSettingsPath(p.name));
                 }}
+                onClose={async () => {
+                  setOpen(false);
+                  try {
+                    await closeProject(p.id);
+                    await refreshProjects();
+                    if (currentProject?.id === p.id) {
+                      navigate('/', { replace: true });
+                    }
+                  } catch (err) {
+                    console.error('[sidebar] close project failed', err);
+                  }
+                }}
               />
             ))}
           </div>
@@ -486,11 +501,13 @@ function ProjectRow({
   isCurrent,
   onSelect,
   onSettings,
+  onClose,
 }: {
   project: Project;
   isCurrent: boolean;
   onSelect: () => void;
   onSettings: () => void;
+  onClose: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -549,6 +566,17 @@ function ProjectRow({
             className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent-yellow font-medium"
           >
             ⚙ Settings
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMenuOpen(false);
+              onClose();
+            }}
+            className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent-yellow font-medium border-t-2 border-black"
+            title="Remove from sidebar (.slark/ folder kept on disk)"
+          >
+            ✕ Close
           </button>
         </div>
       )}

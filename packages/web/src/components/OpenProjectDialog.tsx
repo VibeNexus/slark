@@ -18,11 +18,8 @@
 
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  createChannel,
-  createProject,
-  listProjects,
-} from '../lib/api';
+import type { Project } from '@slark/shared';
+import { createChannel, listChannels, listProjects } from '../lib/api';
 import { useChannelsStore } from '../stores/channels';
 import { useProjectsStore } from '../stores/projects';
 import { projectIndexPath } from '../lib/routes';
@@ -64,7 +61,7 @@ export function OpenProjectDialog({ open, onClose }: Props) {
     setBusy(true);
     setError(null);
     try {
-      // 1. 名字唯一：用 trimmed path 末段 slugify，重名追加 -2/-3...
+      // 名字唯一：用 trimmed path 末段 slugify，重名追加 -2/-3...
       const existing = await listProjects();
       const baseName = deriveProjectName(trimmed);
       const finalName = ensureUniqueName(
@@ -72,25 +69,48 @@ export function OpenProjectDialog({ open, onClose }: Props) {
         new Set(existing.map((p) => p.name)),
       );
 
-      // 2. 创建 Project — goal 占位（用户后续可在 Settings 改）
-      const project = await createProject({
-        name: finalName,
-        display_name: deriveDisplayName(trimmed),
-        workspace_path: trimmed,
-        goal: '(Goal not set yet — describe what this project is about to let Team Architect recommend a team.)',
-        color: hashColor(trimmed),
+      // POST /api/projects/open：服务端检测 <path>/.slark/ 是否已存在 → reopen 或新建
+      // 前端 createProject wrapper 会先 then((res) => res.project)，但我们需要 is_new
+      // 直接调 fetch 避免封装吞掉
+      const res = await fetch('/api/projects/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: finalName,
+          display_name: deriveDisplayName(trimmed),
+          workspace_path: trimmed,
+          goal: '(Goal not set yet — describe what this project is about to let Team Architect recommend a team.)',
+          color: hashColor(trimmed),
+        }),
       });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`${res.status} ${res.statusText}: ${body}`);
+      }
+      const { project, is_new: isNew } = (await res.json()) as {
+        project: Project;
+        is_new: boolean;
+      };
 
-      // 3. 默认 #general channel
-      const channel = await createChannel({
-        name: 'general',
-        description: 'Project-wide discussion',
-        type: 'channel',
-        project_id: project.id,
-      });
-      upsertChannel(channel);
+      if (isNew) {
+        // 新建项目：seed 默认 #general channel
+        const channel = await createChannel({
+          name: 'general',
+          description: 'Project-wide discussion',
+          type: 'channel',
+          project_id: project.id,
+        });
+        upsertChannel(channel);
+      } else {
+        // Reopen：channel 已经在 .slark/slark.db 中；仅刷新 store
+        try {
+          const channels = await listChannels(project.id);
+          channels.forEach(upsertChannel);
+        } catch {
+          /* ignore */
+        }
+      }
 
-      // 4. 刷新 projects store + 切到新 project + 跳转
       await refreshProjects();
       setCurrentProject(project.id);
       navigate(projectIndexPath(project.name));
