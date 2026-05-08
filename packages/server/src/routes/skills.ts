@@ -1,43 +1,45 @@
 /**
- * Skill Matrix REST API（Sprint 6 CP4 / CP5）
- *
- * Endpoints:
- *   GET /api/agents/:id/skills                            该 agent 的所有 skill
- *   GET /api/projects/:id/skills                          该 project 内所有 agent skill 概览
- *   GET /api/projects/:id/skill-suggest?keyword=auth      推荐 assignee（按 keyword 匹配 skill_key）
+ * Skill Matrix REST API（D-21 重构）
  */
 
 import type { FastifyInstance } from 'fastify';
-import type { Database } from 'better-sqlite3';
-import { agentRepo, projectRepo, skillRepo } from '../db/repos.js';
+import { agentRepo, skillRepo } from '../db/repos.js';
+import { dbForProjectId, dbForResource } from './_helpers.js';
 
-export async function skillRoutes(app: FastifyInstance, db: Database): Promise<void> {
+export async function skillRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/agents/:id/skills', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (!agentRepo.getById(db, id)) {
+    const ctx = dbForResource('agents', id);
+    if (!ctx) {
       reply.code(404);
       return { error: 'agent not found' };
     }
-    return skillRepo.listByAgent(db, id);
+    if (!agentRepo.getById(ctx.db, id)) {
+      reply.code(404);
+      return { error: 'agent not found' };
+    }
+    return skillRepo.listByAgent(ctx.db, id).map((s) => ({ ...s, project_id: ctx.projectId }));
   });
 
   app.get('/api/projects/:id/skills', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (!projectRepo.getById(db, id)) {
+    const ctx = dbForProjectId(id);
+    if (!ctx) {
       reply.code(404);
       return { error: 'project not found' };
     }
-    return skillRepo.listByProject(db, id);
+    return skillRepo.list(ctx.db).map((s) => ({ ...s, project_id: ctx.projectId }));
   });
 
   app.get('/api/projects/:id/skill-suggest', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (!projectRepo.getById(db, id)) {
+    const ctx = dbForProjectId(id);
+    if (!ctx) {
       reply.code(404);
       return { error: 'project not found' };
     }
     const q = req.query as { keyword?: string };
     if (!q.keyword || !q.keyword.trim()) return [];
-    return skillRepo.suggestAgents(db, id, q.keyword.trim(), 5);
+    return skillRepo.suggestAgents(ctx.db, q.keyword.trim(), 5);
   });
 }

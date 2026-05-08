@@ -38,7 +38,7 @@ export function deriveResponsibilitiesForWorkflow(
   if (!wf) throw new Error(`workflow ${workflowId} not found`);
 
   const def = parseWorkflowYaml(wf.definition_yaml);
-  const projectAgents = agentRepo.listByProject(db, wf.project_id);
+  const projectAgents = agentRepo.list(db);
 
   const newRows: Array<{
     step_id: string;

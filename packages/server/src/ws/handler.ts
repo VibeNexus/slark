@@ -1,16 +1,16 @@
 /**
- * WebSocket 连接处理：parse → route → subscribe/unsubscribe → send_message 走 MessageRouter
+ * WebSocket 连接处理（D-21 重构）：从 channel_id 反查 per-project db
  */
 
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { ClientEvent, ServerEvent } from '@slark/shared';
-import type { Database } from 'better-sqlite3';
 import { messageRepo } from '../db/repos.js';
 import { routeUserMessage } from '../messaging/router.js';
 import { hub } from './hub.js';
+import { dbForResource } from '../routes/_helpers.js';
 
-export function registerWSRoute(app: FastifyInstance, db: Database): void {
+export function registerWSRoute(app: FastifyInstance): void {
   app.register(async (fastify) => {
     fastify.get('/ws', { websocket: true }, (socket: WebSocket) => {
       app.log.info('ws client connected');
@@ -26,7 +26,7 @@ export function registerWSRoute(app: FastifyInstance, db: Database): void {
           send({ type: 'error', code: 'invalid_json', message: 'invalid JSON' });
           return;
         }
-        handleClientEvent(parsed, socket, db, app, send).catch((err: unknown) => {
+        handleClientEvent(parsed, socket, app, send).catch((err: unknown) => {
           app.log.error({ err }, 'ws handler error');
           send({
             type: 'error',
@@ -51,7 +51,6 @@ export function registerWSRoute(app: FastifyInstance, db: Database): void {
 async function handleClientEvent(
   event: ClientEvent,
   socket: WebSocket,
-  db: Database,
   app: FastifyInstance,
   send: (e: ServerEvent) => void,
 ): Promise<void> {
@@ -61,9 +60,17 @@ async function handleClientEvent(
       return;
 
     case 'subscribe_channel': {
+      const ctx = dbForResource('channels', event.channel_id);
+      if (!ctx) {
+        send({
+          type: 'error',
+          code: 'channel_not_found',
+          message: `channel ${event.channel_id} not found`,
+        });
+        return;
+      }
       hub.subscribe(socket, event.channel_id);
-      // 回送最近历史（最多 50 条）供前端初始化
-      const history = messageRepo.listChannelMain(db, event.channel_id, 50);
+      const history = messageRepo.listChannelMain(ctx.db, event.channel_id, 50);
       send({ type: 'subscribed', channel_id: event.channel_id });
       for (const msg of history) {
         send({ type: 'message', message: msg });
@@ -76,6 +83,15 @@ async function handleClientEvent(
       return;
 
     case 'send_message': {
+      const ctx = dbForResource('channels', event.channel_id);
+      if (!ctx) {
+        send({
+          type: 'error',
+          code: 'channel_not_found',
+          message: `channel ${event.channel_id} not found`,
+        });
+        return;
+      }
       await routeUserMessage(
         {
           channelId: event.channel_id,
@@ -84,7 +100,7 @@ async function handleClientEvent(
           asTask: event.as_task,
         },
         {
-          db,
+          db: ctx.db,
           logger: {
             info: (m) => app.log.info(m),
             warn: (m) => app.log.warn(m),
@@ -97,7 +113,6 @@ async function handleClientEvent(
 
     case 'typing_start':
     case 'typing_stop':
-      // MVP 不做 typing indicator，静默接受
       return;
 
     default:

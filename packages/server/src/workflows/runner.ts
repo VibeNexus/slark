@@ -32,7 +32,6 @@ import type {
 import { LOCAL_USER_ID } from '@slark/shared';
 import {
   agentRepo,
-  channelRepo,
   messageRepo,
   workflowRepo,
   workflowRunRepo,
@@ -568,13 +567,11 @@ async function scribeRunInBackground(db: Database, runId: number): Promise<void>
   const run = workflowRunRepo.getById(db, runId);
   if (!run || run.status !== 'completed') return;
   if (!run.thread_id) return;
-  const ch = channelRepo.getById(db, run.channel_id);
-  if (!ch?.project_id) return;
   const wf = workflowRepo.getById(db, run.workflow_id);
   if (!wf) return;
 
   const threadMessages = messageRepo.listThread(db, run.thread_id);
-  const projectAgents = agentRepo.listByProject(db, ch.project_id);
+  const projectAgents = agentRepo.list(db);
   const roleMap: Record<string, string> = {};
   for (const a of projectAgents) {
     roleMap[a.id] = a.name;
@@ -584,7 +581,6 @@ async function scribeRunInBackground(db: Database, runId: number): Promise<void>
 
   try {
     const output = await runScribe({
-      project_id: ch.project_id,
       trigger: {
         kind: 'workflow_run',
         workflow_name: wf.name,
@@ -597,7 +593,7 @@ async function scribeRunInBackground(db: Database, runId: number): Promise<void>
 
     if (output.is_fallback) return; // 静默失败，不污染 thread
 
-    const persisted = persistScribeOutput(db, ch.project_id, output, {
+    const persisted = persistScribeOutput(db, output, {
       source_run_id: runId,
     });
     if (persisted.decisions.length === 0 && persisted.lessons.length === 0) {

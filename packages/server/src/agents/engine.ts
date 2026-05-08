@@ -26,9 +26,10 @@ import {
   decisionRepo,
   lessonRepo,
   messageRepo,
-  projectRepo,
   skillRepo,
 } from '../db/repos.js';
+import { listOpenDbs } from '../db/index.js';
+import { projectsService } from '../config/projects-service.js';
 import { hub } from '../ws/hub.js';
 import { buildContext } from './context-builder.js';
 import { ActivityRecorder } from './activity-recorder.js';
@@ -145,9 +146,8 @@ export async function triggerAgent(
   // 1. 构建上下文
   const channel = channelRepo.getById(db, ctx.channelId);
   const teamAgents = channel ? agentRepo.listInChannel(db, channel.id) : [];
-  const project = channel?.project_id
-    ? projectRepo.getById(db, channel.project_id)
-    : null;
+  // D-21：从 db handle 反查 project meta（db pool 维护 path → handle 映射）
+  const project = resolveProjectFromDb(db);
   // 取最近 50 条历史（context-builder 会再按 token 预算裁剪）
   const history = ctx.parentMessageId
     ? messageRepo.listThread(db, ctx.parentMessageId)
@@ -160,12 +160,8 @@ export async function triggerAgent(
 
   // Sprint 4 CP5：注入 audience 匹配的 lessons + 最新 decisions（仅 approved）
   const audiences = ['all', 'team', agent.name, agent.id];
-  const lessons = project
-    ? lessonRepo.listForInjection(db, project.id, audiences, 20)
-    : [];
-  const decisions = project
-    ? decisionRepo.listByProject(db, project.id, { review_status: 'approved', limit: 5 })
-    : [];
+  const lessons = lessonRepo.listForInjection(db, audiences, 20);
+  const decisions = decisionRepo.list(db, { review_status: 'approved', limit: 5 });
 
   const built = buildContext({
     targetAgent: agent,
@@ -218,10 +214,10 @@ export async function triggerAgent(
   });
   broadcastAgentStatus(agent.id, 'thinking', ctx.channelId);
 
-  // 4. cwd 解析（D-8 v1.0 终态）：必须有 project.workspace_path，否则报错
+  // 4. cwd 解析（D-21）：从 db handle 反查 project workspace_path
   let cwd: string;
   try {
-    cwd = resolveCwd(db, channel?.project_id ?? null, ctx.channelId);
+    cwd = resolveCwd(db, ctx.channelId);
   } catch (e) {
     const errMsg = (e as Error).message;
     log.warn(`[engine] resolveCwd failed: ${errMsg}`);
@@ -358,7 +354,7 @@ export async function triggerAgent(
     try {
       const keys = collectSkillKeysFromEvents(result.events, project.workspace_path);
       for (const key of keys) {
-        skillRepo.bumpTouch(db, agent.id, project.id, key);
+        skillRepo.bumpTouch(db, agent.id, key);
       }
     } catch (e) {
       log.warn(`[engine] skill tracking failed: ${(e as Error).message}`);
@@ -425,23 +421,26 @@ function broadcastAgentStatus(
 }
 
 /**
- * 解析 Agent spawn 的工作目录（D-8 v1.0 终态，CP8.5 移除沙盒 fallback）：
- *   - 若 channel 绑定 Project 且 Project 有 workspace_path → 使用之
- *   - 否则抛错（v1.0 起所有 channel 必须归属 Project；旧 v0 channel 已无运行时支持）
+ * 解析 Agent spawn 的工作目录（D-21）：从 db handle 反查 project workspace_path。
  */
-function resolveCwd(db: Database, projectId: string | null, channelId: string): string {
-  if (!projectId) {
-    throw new Error(
-      `channel ${channelId} has no project_id; v1.0 requires every channel to belong to a Project (D-13). Recreate the channel via Create Project flow.`,
-    );
-  }
-  const project = projectRepo.getById(db, projectId);
+function resolveCwd(db: Database, channelId: string): string {
+  const project = resolveProjectFromDb(db);
   if (!project?.workspace_path) {
     throw new Error(
-      `project ${projectId} has no workspace_path; cannot spawn agent (D-13).`,
+      `channel ${channelId}'s db is not associated with any project (D-21). Re-open the project from Sidebar.`,
     );
   }
   return project.workspace_path;
+}
+
+/** D-21：从 db handle 反查项目 meta（per-project handle pool） */
+function resolveProjectFromDb(db: Database) {
+  for (const open of listOpenDbs()) {
+    if (open.db === db) {
+      return projectsService.getByPath(open.workspacePath);
+    }
+  }
+  return null;
 }
 
 /**

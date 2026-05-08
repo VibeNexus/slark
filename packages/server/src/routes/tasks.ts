@@ -4,6 +4,7 @@ import type { MessageMetadata, TaskStatus } from '@slark/shared';
 import { LOCAL_USER_ID } from '@slark/shared';
 import { agentRepo, messageRepo, taskRepo } from '../db/repos.js';
 import { hub } from '../ws/hub.js';
+import { dbForResource, forEachProjectDb } from './_helpers.js';
 
 const STATUS_EMOJI: Record<TaskStatus, string> = {
   todo: '📝',
@@ -25,14 +26,17 @@ function getActorName(db: Database, actorId: string): string {
   return agent?.name ?? 'Unknown';
 }
 
-export async function taskRoutes(app: FastifyInstance, db: Database): Promise<void> {
-  // 列出任务（可按 channel / status 过滤）
+export async function taskRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/tasks', async (req) => {
     const query = req.query as { channel_id?: string; status?: TaskStatus };
-    return taskRepo.list(db, query);
+    if (query.channel_id) {
+      const ctx = dbForResource('channels', query.channel_id);
+      if (!ctx) return [];
+      return taskRepo.list(ctx.db, query);
+    }
+    return forEachProjectDb(({ db }) => taskRepo.list(db, query));
   });
 
-  // 创建任务
   app.post('/api/tasks', async (req, reply) => {
     const body = req.body as {
       channel_id: string;
@@ -45,8 +49,13 @@ export async function taskRoutes(app: FastifyInstance, db: Database): Promise<vo
       reply.code(400);
       return { error: 'channel_id and title are required' };
     }
+    const ctx = dbForResource('channels', body.channel_id);
+    if (!ctx) {
+      reply.code(404);
+      return { error: 'channel not found' };
+    }
     const createdBy = body.created_by ?? LOCAL_USER_ID;
-    const task = taskRepo.create(db, {
+    const task = taskRepo.create(ctx.db, {
       channel_id: body.channel_id,
       title: body.title,
       assignee_agent_id: body.assignee_agent_id,
@@ -54,7 +63,6 @@ export async function taskRoutes(app: FastifyInstance, db: Database): Promise<vo
       created_by: createdBy,
     });
 
-    // 广播 system message
     const metadata: MessageMetadata = {
       system_event: { type: 'task_created', task_id: task.id, title: task.title },
       task_ref: {
@@ -64,7 +72,7 @@ export async function taskRoutes(app: FastifyInstance, db: Database): Promise<vo
         assignee_agent_id: task.assignee_agent_id,
       },
     };
-    const sysMsg = messageRepo.create(db, {
+    const sysMsg = messageRepo.create(ctx.db, {
       channel_id: body.channel_id,
       sender_type: 'system',
       sender_id: LOCAL_USER_ID,
@@ -78,10 +86,14 @@ export async function taskRoutes(app: FastifyInstance, db: Database): Promise<vo
     return task;
   });
 
-  // 详情
   app.get('/api/tasks/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const t = taskRepo.getById(db, Number(id));
+    const ctx = dbForResource('tasks', Number(id));
+    if (!ctx) {
+      reply.code(404);
+      return { error: 'task not found' };
+    }
+    const t = taskRepo.getById(ctx.db, Number(id));
     if (!t) {
       reply.code(404);
       return { error: 'task not found' };
@@ -89,31 +101,33 @@ export async function taskRoutes(app: FastifyInstance, db: Database): Promise<vo
     return t;
   });
 
-  // 更新（含状态变更）
   app.patch('/api/tasks/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
+    const ctx = dbForResource('tasks', Number(id));
+    if (!ctx) {
+      reply.code(404);
+      return { error: 'task not found' };
+    }
     const body = req.body as {
       title?: string;
       status?: TaskStatus;
       assignee_agent_id?: string | null;
       by?: string;
     };
-    const before = taskRepo.getById(db, Number(id));
+    const before = taskRepo.getById(ctx.db, Number(id));
     if (!before) {
       reply.code(404);
       return { error: 'task not found' };
     }
-
-    const task = taskRepo.update(db, Number(id), body ?? {});
+    const task = taskRepo.update(ctx.db, Number(id), body ?? {});
     if (!task) {
       reply.code(404);
       return { error: 'task not found' };
     }
 
-    // 如果状态变了，发 system message
     if (body?.status && body.status !== before.status) {
       const actor = body.by ?? LOCAL_USER_ID;
-      const actorName = getActorName(db, actor);
+      const actorName = getActorName(ctx.db, actor);
       const emoji = STATUS_EMOJI[body.status];
       const content =
         body.status === 'in_progress'
@@ -138,7 +152,7 @@ export async function taskRoutes(app: FastifyInstance, db: Database): Promise<vo
           assignee_agent_id: task.assignee_agent_id,
         },
       };
-      const sysMsg = messageRepo.create(db, {
+      const sysMsg = messageRepo.create(ctx.db, {
         channel_id: task.channel_id,
         sender_type: 'system',
         sender_id: LOCAL_USER_ID,
@@ -152,11 +166,15 @@ export async function taskRoutes(app: FastifyInstance, db: Database): Promise<vo
     return task;
   });
 
-  // 删除
   app.delete('/api/tasks/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const t = taskRepo.getById(db, Number(id));
-    taskRepo.remove(db, Number(id));
+    const ctx = dbForResource('tasks', Number(id));
+    if (!ctx) {
+      reply.code(404);
+      return { error: 'task not found' };
+    }
+    const t = taskRepo.getById(ctx.db, Number(id));
+    taskRepo.remove(ctx.db, Number(id));
     if (t) {
       hub.broadcast(t.channel_id, { type: 'task_update', task: { ...t, status: 'done' } });
     }

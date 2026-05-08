@@ -25,9 +25,9 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import { config } from './config.js';
-import { getDb, closeDb } from './db/index.js';
-import { runSeed } from './db/seed.js';
-import { channelRepo, agentRepo, projectRepo, workflowRepo } from './db/repos.js';
+import { closeAllDbs, openProjectDb } from './db/index.js';
+import { runStartupCheck } from './db/seed.js';
+import { workflowRepo } from './db/repos.js';
 import { importBuiltinsForProject } from './workflows/builtin-import.js';
 import { deriveResponsibilitiesForWorkflow } from './workflows/derive-responsibilities.js';
 import { startEvaluatorScheduler } from './system-agents/evaluator.js';
@@ -46,6 +46,8 @@ import { workflowSessionRoutes } from './routes/workflow-sessions.js';
 import { registerWSRoute } from './ws/handler.js';
 import { hub } from './ws/hub.js';
 import { concurrencyQueue } from './agents/queue.js';
+import { projectsService } from './config/projects-service.js';
+import { warmUpAllProjects } from './routes/_helpers.js';
 
 async function main() {
   const app = Fastify({
@@ -82,46 +84,40 @@ async function main() {
 
   await app.register(websocket);
 
-  // 初始化数据库 + seed
-  const db = getDb();
-  app.log.info(`✓ Database initialized at ${config.slarkHome}/slark.db`);
-  await runSeed(db, {
-    info: (m) => app.log.info(m),
-    warn: (m) => app.log.warn(m),
+  // D-21：启动期不再有"中央 db"。仅打印 recent projects 状态。
+  await runStartupCheck({
+    info: (m: string) => app.log.info(m),
+    warn: (m: string) => app.log.warn(m),
   });
 
-  // Sprint 2 CP2：给已存在的 Project 补齐 builtin workflow 模板（已存在的跳过）
-  for (const p of projectRepo.list(db)) {
-    const res = importBuiltinsForProject(db, p.id);
-    if (res.imported > 0) {
-      app.log.info(
-        { project: p.name, ...res },
-        '[workflows] builtin templates seeded',
-      );
-    }
-    if (res.errors.length > 0) {
-      app.log.warn(
-        { project: p.name, errors: res.errors },
-        '[workflows] some builtin templates failed to seed',
-      );
-    }
-  }
+  // Warm-up：把 ~/.slark/projects.json 中所有 recent project 的 db 都打开
+  // 让全局视图（/inbox /threads /tasks）+ 资源反查（findDbByResource）能正常工作
+  const warm = warmUpAllProjects();
+  app.log.info({ opened: warm.opened, errors: warm.errors }, '[startup] warmed up project dbs');
 
-  // Sprint 3 CP1：给已存在的 workflows 补齐 responsibilities（首次升级到 schema v5 时需要）
-  for (const wf of workflowRepo.list(db)) {
+  // 给已存在的 project 补 builtin workflows + derive responsibilities
+  for (const p of projectsService.list()) {
     try {
-      const res = deriveResponsibilitiesForWorkflow(db, wf.id);
-      if (res.unresolved.length > 0) {
-        app.log.warn(
-          { workflow: wf.name, unresolved: res.unresolved },
-          '[workflows] derived responsibilities have unresolved agents (will resolve once those agents exist)',
+      const db = openProjectDb(p.workspace_path);
+      const res = importBuiltinsForProject(db);
+      if (res.imported > 0) {
+        app.log.info(
+          { project: p.name, ...res },
+          '[workflows] builtin templates seeded',
         );
       }
+      for (const wf of workflowRepo.list(db)) {
+        try {
+          deriveResponsibilitiesForWorkflow(db, wf.id);
+        } catch (e) {
+          app.log.warn(
+            { err: e, workflow: wf.name, project: p.name },
+            '[workflows] derive failed',
+          );
+        }
+      }
     } catch (e) {
-      app.log.warn(
-        { err: e, workflow: wf.name },
-        '[workflows] failed to derive responsibilities',
-      );
+      app.log.warn({ project: p.name, err: e }, '[startup] project init failed');
     }
   }
 
@@ -130,35 +126,32 @@ async function main() {
     ok: true,
     version: '0.0.1',
     slark_home: config.slarkHome,
-    db: {
-      channels: channelRepo.list(db).length,
-      agents: agentRepo.list(db).length,
-    },
+    projects: projectsService.list().length,
     ws: hub.snapshot(),
     queue: concurrencyQueue.snapshot(),
   }));
 
   await runtimesRoutes(app);
   await settingsRoutes(app);
-  await projectRoutes(app, db);
-  await channelRoutes(app, db);
-  await agentRoutes(app, db);
-  await taskRoutes(app, db);
-  await workflowRoutes(app, db);
-  await intelligenceRoutes(app, db);
-  await feedbackRoutes(app, db);
-  await skillRoutes(app, db);
-  await workflowSessionRoutes(app, db);
-  await extraRoutes(app, db);
+  await projectRoutes(app);
+  await channelRoutes(app);
+  await agentRoutes(app);
+  await taskRoutes(app);
+  await workflowRoutes(app);
+  await intelligenceRoutes(app);
+  await feedbackRoutes(app);
+  await skillRoutes(app);
+  await workflowSessionRoutes(app);
+  await extraRoutes(app);
 
   // WebSocket
-  registerWSRoute(app, db);
+  registerWSRoute(app);
 
-  // Sprint 5 CP2：启动 Evaluator 后台调度（每 24h 一轮）
-  startEvaluatorScheduler(db, {
-    info: (m) => app.log.info(m),
-    warn: (m) => app.log.warn(m),
-    error: (m) => app.log.error(m),
+  // Sprint 5 CP2：Evaluator 调度（D-21 后改为遍历所有 open project 各跑一轮）
+  startEvaluatorScheduler({
+    info: (m: string) => app.log.info(m),
+    warn: (m: string) => app.log.warn(m),
+    error: (m: string) => app.log.error(m),
   });
 
   try {
@@ -169,7 +162,7 @@ async function main() {
 
     const onShutdown = () => {
       app.log.info('shutting down...');
-      closeDb();
+      closeAllDbs();
       app.close().then(() => process.exit(0));
     };
     process.on('SIGINT', onShutdown);
