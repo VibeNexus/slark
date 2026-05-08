@@ -61,6 +61,12 @@ export type ServerEvent =
     }
   | { type: 'subscribed'; channel_id: string }
   | { type: 'pong' }
+  /**
+   * D-21 Sprint C：跨 project 全局事件，由 hub.broadcastGlobal 投递到所有连接。
+   * Frontend Sidebar / Inbox 收到后 refresh 对应 store。
+   */
+  | { type: 'project_list_changed'; reason: 'opened' | 'closed' | 'deleted' | 'updated' }
+  | { type: 'knowledge_updated'; project_id: string; kind: 'decision' | 'lesson' }
   | { type: 'error'; code: string; message: string };
 
 // =============================================================================

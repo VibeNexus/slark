@@ -25,6 +25,7 @@ import { projectsService } from '../config/projects-service.js';
 import { suggestTeam } from '../system-agents/team-architect.js';
 import { runOnboarderForProject } from '../system-agents/onboarder.js';
 import { importBuiltinsForProject } from '../workflows/builtin-import.js';
+import { hub } from '../ws/hub.js';
 
 const NAME_SLUG_RE = /^[a-z0-9_-]+$/;
 
@@ -120,7 +121,14 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
       } catch (e) {
         req.log.warn(`[projects] ensureGitignore failed: ${(e as Error).message}`);
       }
+      try {
+        projectsService.ensureReadme(result.project.workspace_path);
+      } catch (e) {
+        req.log.warn(`[projects] ensureReadme failed: ${(e as Error).message}`);
+      }
     }
+
+    hub.broadcastGlobal({ type: 'project_list_changed', reason: 'opened' });
 
     reply.code(result.isNew ? 201 : 200);
     return { project: result.project, is_new: result.isNew };
@@ -200,6 +208,7 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
       reply.code(404);
       return { error: 'project not found' };
     }
+    hub.broadcastGlobal({ type: 'project_list_changed', reason: 'updated' });
     return p;
   });
 
@@ -213,6 +222,7 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
     }
     closeProjectDb(p.workspace_path);
     projectsService.close(id);
+    hub.broadcastGlobal({ type: 'project_list_changed', reason: 'closed' });
     reply.code(204);
   });
 
@@ -233,6 +243,7 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
     }
     closeProjectDb(p.workspace_path);
     projectsService.deleteStorage(id);
+    hub.broadcastGlobal({ type: 'project_list_changed', reason: 'deleted' });
     reply.code(204);
   });
 

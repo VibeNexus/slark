@@ -69,6 +69,28 @@ class WSHub {
     }
   }
 
+  /**
+   * 向所有连接广播（D-21 Sprint C：跨 project 全局事件，
+   * 如 inbox / knowledge 同步推送、project list 变化）。
+   * 不同于 broadcast(channelId, ...)，本接口忽略订阅，向全部 socket 发。
+   */
+  broadcastGlobal(event: ServerEvent): void {
+    const payload = JSON.stringify(event);
+    const sockets = new Set<WebSocket>();
+    for (const subs of this.channelSubs.values()) {
+      for (const s of subs) sockets.add(s);
+    }
+    for (const s of sockets) {
+      if (s.readyState === 1) {
+        try {
+          s.send(payload);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
+
   /** 向指定 socket 发送 */
   send(socket: WebSocket, event: ServerEvent): void {
     if (socket.readyState !== 1) return;

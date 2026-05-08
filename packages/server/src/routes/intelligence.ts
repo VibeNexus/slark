@@ -8,6 +8,8 @@
 import type { FastifyInstance } from 'fastify';
 import type { LessonKind, ReviewStatus } from '@slark/shared';
 import { decisionRepo, lessonRepo } from '../db/repos.js';
+import { syncKnowledgeJsonl } from '../config/knowledge-store.js';
+import { hub } from '../ws/hub.js';
 import { dbForProjectId, dbForResource } from './_helpers.js';
 
 const REVIEW_STATUSES: ReviewStatus[] = ['pending', 'approved', 'rejected'];
@@ -60,6 +62,12 @@ export async function intelligenceRoutes(app: FastifyInstance): Promise<void> {
       recorded_by: 'local-user',
       review_status: 'approved',
     });
+    try {
+      syncKnowledgeJsonl(ctx.db, ctx.workspacePath);
+    } catch (e) {
+      req.log.warn(`[knowledge] sync after decision create failed: ${(e as Error).message}`);
+    }
+    hub.broadcastGlobal({ type: 'knowledge_updated', project_id: ctx.projectId, kind: 'decision' });
     reply.code(201);
     return { ...d, project_id: ctx.projectId };
   });
@@ -113,6 +121,11 @@ export async function intelligenceRoutes(app: FastifyInstance): Promise<void> {
       body: body.body,
       audience: body.audience,
     });
+    try {
+      syncKnowledgeJsonl(ctx.db, ctx.workspacePath);
+    } catch (e) {
+      req.log.warn(`[knowledge] sync after decision review failed: ${(e as Error).message}`);
+    }
     return updated ? { ...updated, project_id: ctx.projectId } : null;
   });
 
@@ -125,6 +138,11 @@ export async function intelligenceRoutes(app: FastifyInstance): Promise<void> {
       return { error: 'decision not found' };
     }
     decisionRepo.remove(ctx.db, decisionId);
+    try {
+      syncKnowledgeJsonl(ctx.db, ctx.workspacePath);
+    } catch (e) {
+      req.log.warn(`[knowledge] sync after decision delete failed: ${(e as Error).message}`);
+    }
     reply.code(204);
   });
 
@@ -184,6 +202,12 @@ export async function intelligenceRoutes(app: FastifyInstance): Promise<void> {
       recorded_by: 'local-user',
       review_status: 'approved',
     });
+    try {
+      syncKnowledgeJsonl(ctx.db, ctx.workspacePath);
+    } catch (e) {
+      req.log.warn(`[knowledge] sync after lesson create failed: ${(e as Error).message}`);
+    }
+    hub.broadcastGlobal({ type: 'knowledge_updated', project_id: ctx.projectId, kind: 'lesson' });
     reply.code(201);
     return { ...l, project_id: ctx.projectId };
   });
@@ -229,6 +253,11 @@ export async function intelligenceRoutes(app: FastifyInstance): Promise<void> {
       kind,
       tags: body.tags,
     });
+    try {
+      syncKnowledgeJsonl(ctx.db, ctx.workspacePath);
+    } catch (e) {
+      req.log.warn(`[knowledge] sync after lesson review failed: ${(e as Error).message}`);
+    }
     return updated ? { ...updated, project_id: ctx.projectId } : null;
   });
 
@@ -241,6 +270,11 @@ export async function intelligenceRoutes(app: FastifyInstance): Promise<void> {
       return { error: 'lesson not found' };
     }
     lessonRepo.remove(ctx.db, lessonId);
+    try {
+      syncKnowledgeJsonl(ctx.db, ctx.workspacePath);
+    } catch (e) {
+      req.log.warn(`[knowledge] sync after lesson delete failed: ${(e as Error).message}`);
+    }
     reply.code(204);
   });
 }
