@@ -22,6 +22,9 @@ export async function agentRoutes(app: FastifyInstance, db: Database): Promise<v
       runtime: Runtime;
       model?: string | null;
       reasoning?: ReasoningEffort | null;
+      // Sprint 4-ext / Phase A：可选的 ModelSelection.params 字段
+      thinking?: boolean | null;
+      context?: '300k' | '1m' | null;
       env_vars?: Record<string, string>;
       avatar?: string | null;
       project_id?: string | null;

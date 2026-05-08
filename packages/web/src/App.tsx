@@ -32,6 +32,7 @@ import { wsClient } from './lib/ws';
 import { Layout } from './components/Layout';
 import { WelcomePage } from './pages/WelcomePage';
 import { ProjectIndexPage } from './pages/ProjectIndexPage';
+import { ProjectSettingsPage } from './pages/ProjectSettingsPage';
 import { ChannelPage } from './pages/ChannelPage';
 import { DMPage } from './pages/DMPage';
 import { GlobalThreadsPage } from './pages/GlobalThreadsPage';
@@ -70,6 +71,7 @@ export function App() {
             <Route path="agent/:agentId" element={<AgentPlaceholder />} />
             <Route path="workflows" element={<WorkflowsPage />} />
             <Route path="intelligence" element={<IntelligencePage />} />
+            <Route path="settings" element={<ProjectSettingsPage />} />
           </Route>
 
           {/* 全局视图（跨 Project） */}

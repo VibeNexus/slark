@@ -15,7 +15,7 @@ import { Link, Navigate } from 'react-router-dom';
 import type { CursorBackendStatus, RuntimeDetection } from '@slark/shared';
 import { getCursorSettings, getRuntimes } from '../lib/api';
 import { useProjectsStore } from '../stores/projects';
-import { CreateProjectDialog } from '../components/CreateProjectDialog';
+import { OpenProjectDialog } from '../components/OpenProjectDialog';
 import { projectIndexPath } from '../lib/routes';
 
 export function WelcomePage() {
@@ -105,11 +105,11 @@ export function WelcomePage() {
             onClick={() => setDialogOpen(true)}
             className="w-full px-4 py-3 border-2 border-black rounded bg-accent-pink font-bold text-lg hover:brightness-105 shadow-[4px_4px_0_0_#000]"
           >
-            + Create your first Project
+            📂 Open a project folder
           </button>
           <div className="text-[12px] font-mono text-text-muted">
-            Each project binds to a code repo. You set a goal, Team Architect recommends agents,
-            and you approve the team.
+            Pick any local code folder. Slark creates a workspace + default <span className="font-mono">#general</span> channel
+            instantly. Describe the goal & build an AI team afterwards from Project Settings.
           </div>
         </div>
 
@@ -118,7 +118,7 @@ export function WelcomePage() {
         </div>
       </div>
 
-      <CreateProjectDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
+      <OpenProjectDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
     </div>
   );
 }

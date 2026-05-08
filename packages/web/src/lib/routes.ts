@@ -41,6 +41,10 @@ export function projectIntelligencePath(projectName: string): string {
   return `/p/${projectName}/intelligence`;
 }
 
+export function projectSettingsPath(projectName: string): string {
+  return `/p/${projectName}/settings`;
+}
+
 /**
  * 根据 channel id 解析完整路径。
  * 优先用 channel.project_id 对应的 project name；若 channel 无 project_id（v0 兼容数据），

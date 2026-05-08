@@ -161,22 +161,28 @@ function SettingsTab({
 }
 
 function MembersTab({ channel }: { channel: Channel }) {
-  const [allAgents, setAllAgents] = useState<Agent[]>([]);
+  const [projectAgents, setProjectAgents] = useState<Agent[]>([]);
   const [channelAgents, setChannelAgents] = useState<Agent[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
 
+  // D-13：Agent 跟 Project 走，跨 Project 不互通。
+  // OTHER AGENTS 列表只包含当前 channel 所属 Project 内、且未加入此 channel 的 agent。
+  // channel.project_id 为 null 时（理论上 v1.0 已无此情况，兼容老 channel）退回到全局列表。
   const load = async () => {
-    const [all, inChannel] = await Promise.all([listAgents(), getChannelAgents(channel.id)]);
-    setAllAgents(all);
+    const [scoped, inChannel] = await Promise.all([
+      listAgents(channel.project_id ?? undefined),
+      getChannelAgents(channel.id),
+    ]);
+    setProjectAgents(scoped);
     setChannelAgents(inChannel);
   };
 
   useEffect(() => {
     void load();
-  }, [channel.id]);
+  }, [channel.id, channel.project_id]);
 
   const memberIds = new Set(channelAgents.map((a) => a.id));
-  const nonMembers = allAgents.filter((a) => !memberIds.has(a.id));
+  const nonMembers = projectAgents.filter((a) => !memberIds.has(a.id));
 
   const add = async (agentId: string) => {
     setBusy(agentId);

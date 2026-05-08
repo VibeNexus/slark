@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { ChatMessage } from '@slark/shared';
 import { useChannelsStore } from '../stores/channels';
 import { useAgentsStore } from '../stores/agents';
 import { useProjectsStore } from '../stores/projects';
 import { useMessagesStore } from '../stores/messages';
 import { wsClient } from '../lib/ws';
-import { stopAllAgents } from '../lib/api';
-import { projectChannelPath, projectIndexPath } from '../lib/routes';
+import { getChannelAgents, stopAllAgents } from '../lib/api';
+import { projectChannelPath, projectIndexPath, projectSettingsPath } from '../lib/routes';
 import { useChannelCommands } from '../lib/useChannelCommands';
 import { useWorkflowsStore } from '../stores/workflows';
 import { ChannelHeader } from '../components/ChannelHeader';
@@ -57,6 +57,26 @@ export function ChannelPage() {
       wsClient.send({ type: 'unsubscribe_channel', channel_id: channelId });
     };
   }, [channelId, fetchChannel]);
+
+  // 真实 channel-agent 成员（fix: header 右上角人数从全局 11 改为 channel 真实成员数）
+  const [channelAgentIds, setChannelAgentIds] = useState<string[]>([]);
+  useEffect(() => {
+    if (!channelId) {
+      setChannelAgentIds([]);
+      return;
+    }
+    let cancelled = false;
+    void getChannelAgents(channelId)
+      .then((rows) => {
+        if (!cancelled) setChannelAgentIds(rows.map((r) => r.id));
+      })
+      .catch(() => {
+        if (!cancelled) setChannelAgentIds([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [channelId]);
 
   const agentsById = useMemo(
     () => new Map(allAgents.map((a) => [a.id, a])),
@@ -130,7 +150,12 @@ export function ChannelPage() {
     }
   }
 
-  const channelAgents = allAgents.filter(() => true); // 简化：显示全部 agent 数量（TODO: 真正按 channel）
+  // channel 内的 agent（用于 header 右上角人数显示等）
+  const channelAgentIdSet = useMemo(() => new Set(channelAgentIds), [channelAgentIds]);
+  const channelAgents = useMemo(
+    () => allAgents.filter((a) => channelAgentIdSet.has(a.id)),
+    [allAgents, channelAgentIdSet],
+  );
 
   const send = (content: string, opts?: { asTask?: boolean }) => {
     wsClient.send({
@@ -154,6 +179,18 @@ export function ChannelPage() {
     setParams(next);
   };
 
+  // 当前 project 内的 agent（用于 banner 是否显示）
+  const projectAgentCount = useMemo(() => {
+    if (!channel.project_id) return allAgents.length;
+    return allAgents.filter((a) => a.project_id === channel.project_id).length;
+  }, [allAgents, channel.project_id]);
+
+  // 当前 project 的 goal 是不是 OpenProjectDialog 写的占位符（"(Goal not set yet …)"）
+  const goalIsPlaceholder = useMemo(() => {
+    const proj = projects.find((p) => p.id === channel.project_id);
+    return (proj?.goal ?? '').startsWith('(Goal not set yet');
+  }, [projects, channel.project_id]);
+
   return (
     <div className="flex-1 flex min-w-0 min-h-0">
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
@@ -164,6 +201,13 @@ export function ChannelPage() {
           onEditChannel={() => setSettingsOpen({ open: true, tab: 'settings' })}
           onManageMembers={() => setSettingsOpen({ open: true, tab: 'members' })}
         />
+        {(projectAgentCount === 0 || goalIsPlaceholder) && (
+          <BuildTeamBanner
+            projectName={projectName}
+            agentCount={projectAgentCount}
+            goalIsPlaceholder={goalIsPlaceholder}
+          />
+        )}
         {chatTab === 'tasks' ? (
           <TasksPanel channelId={channelId} agents={allAgents} />
         ) : (
@@ -209,5 +253,41 @@ export function ChannelPage() {
         }}
       />
     </div>
+  );
+}
+
+/**
+ * 当前 Project 还没有 agent 或 goal 是 OpenProjectDialog 写的占位符时显示的引导 banner。
+ * 点击直接跳到 Project Settings 页（用户可以输入 goal + Build Team）。
+ */
+function BuildTeamBanner({
+  projectName,
+  agentCount,
+  goalIsPlaceholder,
+}: {
+  projectName: string;
+  agentCount: number;
+  goalIsPlaceholder: boolean;
+}) {
+  let message: string;
+  if (agentCount === 0) {
+    message = goalIsPlaceholder
+      ? 'Project 还没有 goal 也没有 AI 团队。打开 Settings 填写 goal，让 Team Architect 推荐合适的成员。'
+      : 'Project 还没有 AI 团队。打开 Settings 让 Team Architect 基于 goal 推荐成员。';
+  } else {
+    message =
+      'Goal 还是占位符 — 设置真实 goal 才能让 Team Architect 推荐更准的团队。';
+  }
+  return (
+    <Link
+      to={projectSettingsPath(projectName)}
+      className="block px-4 py-2 bg-accent-yellow border-b-2 border-black hover:brightness-105"
+    >
+      <div className="flex items-center gap-2 text-sm">
+        <span>✨</span>
+        <span className="flex-1">{message}</span>
+        <span className="font-bold">Open Settings →</span>
+      </div>
+    </Link>
   );
 }

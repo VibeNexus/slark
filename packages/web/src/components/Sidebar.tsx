@@ -18,6 +18,7 @@ import {
   projectDmPath,
   projectIndexPath,
   projectIntelligencePath,
+  projectSettingsPath,
   projectWorkflowsPath,
 } from '../lib/routes';
 import { Avatar } from './Avatar';
@@ -445,27 +446,21 @@ function ProjectSwitcher({
               </div>
             )}
             {projects.map((p) => (
-              <button
+              <ProjectRow
                 key={p.id}
-                type="button"
-                onClick={() => {
+                project={p}
+                isCurrent={currentProject?.id === p.id}
+                onSelect={() => {
                   onSelect(p.id);
                   setOpen(false);
                   navigate(projectIndexPath(p.name));
                 }}
-                className={cn(
-                  'w-full text-left px-3 py-2 text-sm hover:bg-accent-yellow flex items-center justify-between gap-2',
-                  currentProject?.id === p.id ? 'bg-accent-pink font-bold' : '',
-                )}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium">{p.display_name ?? p.name}</div>
-                  <div className="text-[10px] font-mono text-text-secondary truncate">
-                    {p.workspace_path}
-                  </div>
-                </div>
-                {currentProject?.id === p.id && <span>✓</span>}
-              </button>
+                onSettings={() => {
+                  onSelect(p.id);
+                  setOpen(false);
+                  navigate(projectSettingsPath(p.name));
+                }}
+              />
             ))}
           </div>
           {onCreate && (
@@ -477,9 +472,84 @@ function ProjectSwitcher({
               }}
               className="w-full text-left px-3 py-2 text-sm border-t-2 border-black bg-accent-pink font-bold hover:brightness-105"
             >
-              + New Project
+              📂 Open project folder
             </button>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProjectRow({
+  project,
+  isCurrent,
+  onSelect,
+  onSettings,
+}: {
+  project: Project;
+  isCurrent: boolean;
+  onSelect: () => void;
+  onSettings: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    window.addEventListener('mousedown', onDoc);
+    return () => window.removeEventListener('mousedown', onDoc);
+  }, [menuOpen]);
+
+  return (
+    <div ref={ref} className="relative">
+      <div
+        className={cn(
+          'group flex items-center gap-1 hover:bg-accent-yellow',
+          isCurrent ? 'bg-accent-pink font-bold' : '',
+        )}
+      >
+        <button
+          type="button"
+          onClick={onSelect}
+          className="flex-1 min-w-0 text-left px-3 py-2 text-sm flex items-center justify-between gap-2"
+        >
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-medium">{project.display_name ?? project.name}</div>
+            <div className="text-[10px] font-mono text-text-secondary truncate">
+              {project.workspace_path}
+            </div>
+          </div>
+          {isCurrent && <span className="flex-shrink-0">✓</span>}
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuOpen((v) => !v);
+          }}
+          className="px-2 py-2 hover:bg-bg-card opacity-60 hover:opacity-100"
+          aria-label={`More actions for ${project.name}`}
+          title="More actions"
+        >
+          ⋯
+        </button>
+      </div>
+      {menuOpen && (
+        <div className="absolute right-1 top-full mt-1 z-50 min-w-[160px] bg-bg-card border-2 border-black rounded shadow-[3px_3px_0_0_#000]">
+          <button
+            type="button"
+            onClick={() => {
+              setMenuOpen(false);
+              onSettings();
+            }}
+            className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent-yellow font-medium"
+          >
+            ⚙ Settings
+          </button>
         </div>
       )}
     </div>

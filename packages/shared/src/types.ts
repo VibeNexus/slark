@@ -505,6 +505,16 @@ export interface TeamSuggestionAgent {
   runtime: Runtime | '';
   model: string;
   reasoning: ReasoningEffort;
+  /**
+   * Sprint 4-ext / Phase A：是否启用 Thinking 模式。`null` = 跟 model 默认。
+   * Team Architect 通常给 Architect / Reviewer 推 true，Dev 推 false。
+   */
+  thinking?: boolean | null;
+  /**
+   * Sprint 4-ext / Phase A：Context window size。`null` = 跟 model 默认。
+   * Team Architect 通常给读大量代码的角色（Architect / Reviewer）推 '1m'。
+   */
+  context?: ContextSize | null;
 }
 
 export interface TeamSuggestion {

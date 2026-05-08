@@ -7,7 +7,7 @@ import { useWorkflowsStore } from '../stores/workflows';
 import { Sidebar } from './Sidebar';
 import { CreateAgentDialog } from './CreateAgentDialog';
 import { CreateChannelDialog } from './CreateChannelDialog';
-import { CreateProjectDialog } from './CreateProjectDialog';
+import { OpenProjectDialog } from './OpenProjectDialog';
 import { SearchDialog } from './SearchDialog';
 
 interface Props {
@@ -102,7 +102,7 @@ export function Layout({ children }: Props) {
         onCreated={(c) => upsertChannel(c)}
         projectId={currentProject?.id}
       />
-      <CreateProjectDialog
+      <OpenProjectDialog
         open={createProjectOpen}
         onClose={() => setCreateProjectOpen(false)}
       />

@@ -150,6 +150,8 @@ export function CreateProjectDialog({ open, onClose }: Props) {
             runtime,
             model: a.model || undefined,
             reasoning: a.reasoning,
+            thinking: a.thinking ?? null,
+            context: a.context ?? null,
             project_id: project.id,
           };
           return createAgent(payload);
@@ -465,13 +467,14 @@ function Step2({
 function AgentCard({ agent }: { agent: TeamSuggestionAgent }) {
   return (
     <div className="p-3 border-2 border-black rounded bg-bg-card">
-      <div className="flex items-center justify-between mb-1">
-        <div className="font-bold">{agent.name}</div>
+      <div className="flex items-center justify-between mb-1 gap-2">
+        <div className="font-bold flex-shrink-0">{agent.name}</div>
         <div className="flex gap-1 flex-wrap justify-end">
           <Tag>{agent.role}</Tag>
-          <Tag>{agent.runtime || 'no runtime'}</Tag>
           {agent.model && <Tag>{agent.model}</Tag>}
           {agent.reasoning && <Tag>{agent.reasoning}</Tag>}
+          {agent.thinking === true && <Tag>thinking</Tag>}
+          {agent.context && <Tag>{agent.context.toUpperCase()}</Tag>}
         </div>
       </div>
       <div className="text-[12px] text-text-secondary font-mono">{agent.description}</div>

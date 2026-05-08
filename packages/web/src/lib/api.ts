@@ -29,13 +29,16 @@ import type {
 } from '@slark/shared';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-  });
+  // Fastify 5+ 默认拒绝 "Content-Type: application/json + empty body"（FST_ERR_CTP_EMPTY_JSON_BODY → 400）。
+  // 因此仅在确实有 body 时才声明 JSON content-type。caller 显式覆盖时优先生效。
+  const userHeaders = (init?.headers ?? {}) as Record<string, string>;
+  const hasBody = init?.body !== undefined && init.body !== null;
+  const headers: Record<string, string> = { ...userHeaders };
+  if (hasBody && headers['Content-Type'] === undefined && headers['content-type'] === undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const res = await fetch(path, { ...init, headers });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error(`${res.status} ${res.statusText}: ${body}`);
@@ -151,6 +154,8 @@ export const createAgent = (data: {
   runtime: Runtime;
   model?: string;
   reasoning?: ReasoningEffort;
+  thinking?: boolean | null;
+  context?: '300k' | '1m' | null;
   env_vars?: Record<string, string>;
   project_id?: string;
 }) => request<Agent>('/api/agents', { method: 'POST', body: JSON.stringify(data) });
