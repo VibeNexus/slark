@@ -415,21 +415,37 @@ API 表面**不变**（仍是 `/api/channels`、`/api/agents` 等），只是底
 
 ## 10. 待决议（Q-10~Q-14）
 
-| # | 议题 | 选项 | 倾向 |
+> **2026-05-08 全部已决议** — 全部按推荐选项落地。
+
+| # | 议题 | 决议 | 选项 |
 |---|------|------|------|
-| **Q-10** | `messages` 是否也搬到 JSONL（不止 db）| (a) 仅 db；(b) db + 导出 JSONL；(c) 直接 JSONL | (a) — 高频写 / 索引需求 db 占优 |
-| **Q-11** | 删 Project 默认行为 | (a) 仅从 recent 移除（保留 `.slark/`）；(b) 提示是否删 `.slark/`；(c) 直接删 | (b) — 二次确认明示 |
-| **Q-12** | URL `/p/:projectName` 重名怎么处理 | (a) 保留 name + 重名 -2 后缀；(b) 改 `/p/:projectId` | (a) — 保持当前 UI |
-| **Q-13** | `project.json` 是否含 `lastOpened`（个人化）| (a) 含；(b) 仅 `~/.slark/projects.json` 维护 | (b) — 项目级文件应共享，个人时间戳分开 |
-| **Q-14** | 同一仓库被两个用户开 | (a) 不处理（双方各自有 .slark/，但 git 会冲突）；(b) 提示 .slark/.gitignore；(c) 远期支持 sync | (b) — MVP 提示即可 |
+| **Q-10 ✅** | `messages` 是否也搬到 JSONL | **仅 SQLite db** | (a) — 高频写 / 复杂查询 / FTS 索引需求 |
+| **Q-11 ✅** | 删 Project 默认行为 | **二次确认 dialog**（Close 仅移除 recent / Delete `.slark/` 带身份验证） | (b) |
+| **Q-12 ✅** | URL `/p/:projectName` 重名 | **保留 name 字段 + OpenProjectDialog 自动 `-2` 后缀** | (a) — 不变现有路由 |
+| **Q-13 ✅** | `project.json` 是否含 `lastOpened` | **不含**：`lastOpened` 仅在 `~/.slark/projects.json` 维护，避免 git 冲突 + 个人时间戳泄漏 | (a) |
+| **Q-14 ✅** | 同一仓库两个用户同时打开 | **MVP 不处理**：`.slark/.gitignore` 默认排 `slark.db`，git push 冲突时提示用户 `git merge`；远期再考虑 sync | (a) |
+
+### 10.1 决议影响：Sprint B "Close vs Delete" 双 dialog
+
+由 Q-11 引入：ProjectSettingsPage Danger Zone 改为两个按钮：
+
+```
+[ Close project ]                       (灰色，温和)
+   仅从 ~/.slark/projects.json recent 移除 + 关 db handle
+   `.slark/` 文件夹保留；下次 Open 同 path 立即恢复
+
+[ Delete .slark/ ]                      (红色，需输入项目名确认)
+   级联删除 <workspace>/.slark/ 整个文件夹
+   代码仓库本身不受影响
+```
 
 ---
 
 ## 11. 实施前最终 checklist
 
-- [ ] Q-10 ~ Q-14 全部决议（user signoff）
-- [ ] 备份现有 `~/.slark/slark.db` 到 `~/.slark/slark.db.backup-<date>`
-- [ ] feature/per-project-storage 分支已开（已完成 ✓）
+- [x] Q-10 ~ Q-14 全部决议（user signoff 2026-05-08）
+- [ ] 备份现有 `~/.slark/slark.db` 到 `~/.slark/slark.db.backup-<date>`（Sprint B 启动前）
+- [x] feature/per-project-storage 分支已开
 - [ ] 文档同步到 `docs/project-status.md` Sprint 标记（待 Sprint A 启动时）
 - [ ] `docs/technical-decisions.md` D-21 ~ D-25 增补（待 Sprint A 启动时）
 
@@ -440,3 +456,4 @@ API 表面**不变**（仍是 `/api/channels`、`/api/agents` 等），只是底
 | 版本 | 日期 | 变更 |
 |------|------|------|
 | v0.1 | 2026-05-08 | 初版设计：背景 / 目标态 / 数据归属表 / Sprint 拆解 / Q-10~14 |
+| v0.2 | 2026-05-08 | Q-10~14 全部决议（user signoff），新增 §10.1 Close vs Delete 双 dialog 设计 |
