@@ -4,7 +4,7 @@
 > 询问"当前进展到哪了 / 下一步做什么 / 还有什么阻塞"时，只看这一份。
 > 其他文档（PLAN.md / product-brief.md / technical-decisions.md）不维护状态，只维护内容。
 
-**最近更新**：2026-04-30（Sprint 4-ext / Cursor SDK Adapter 落地）
+**最近更新**：2026-05-08（**Per-Project Storage 重构 Sprint A+B+C 全部落地**）
 
 ---
 
@@ -12,11 +12,40 @@
 
 | 项 | 值 |
 |---|---|
-| 当前 Sprint | **MVP 完成（Sprint 1~7 全部交付）+ Sprint 4-ext（Cursor SDK 适配）** |
-| 下一阶段 | Sprint 8+ 远期路线（无强制时间表） |
-| 最近 Sprint | Sprint 4-ext — Cursor SDK Adapter 旁路（✅ 已落地 S-1/S-2/S-3，见 [`cursorsdkadapter.md`](cursorsdkadapter.md)） |
-| 当前分支 | `main` |
-| 类型检查 | ✅ pnpm typecheck 通过；smoke verify 通过 |
+| 当前 Sprint | **Per-Project Storage 重构 Sprint A+B+C 完成**（D-21 ~ D-25） |
+| 下一阶段 | 验收 + squash merge `feat/per-project-storage` 回 `main`；之后 Sprint 8+ 远期路线 |
+| 最近 Sprint | Per-Project Storage 重构（Sprint A 后端 / Sprint B UX / Sprint C 知识 jsonl + 跨 project 全局视图 + WS 全局事件 + 文档同步） |
+| 当前分支 | `feat/per-project-storage` |
+| 类型检查 | ✅ pnpm -r typecheck 全绿；smoke 启动 + 端到端 open project 流程跑通 |
+
+### Per-Project Storage Sprint A+B+C 已交付摘要（2026-05-08）
+
+基于 [`per-project-storage-design.md`](per-project-storage-design.md) v0.3，落地三个 Sprint：
+
+**Sprint A — 存储层重写（commit `023fcec`）**
+- ✅ 新增 `config/projects-store.ts` `config/project-meta.ts` `config/projects-service.ts`：~/.slark/projects.json + <ws>/.slark/project.json 双层文件存储
+- ✅ 重写 `db/index.ts` 为 LRU handle pool（max=20，30min idle close）+ `findDbByResource` 资源反查 + warm-up 接口
+- ✅ schema.sql 删 projects 表 + 全表去 project_id；`db/repos.ts` 全部 repo 改为 per-project 形态
+- ✅ 重写 `routes/projects.ts`（POST /open、POST /close、POST /delete-storage 替代旧 CRUD）
+- ✅ 所有其他 routes（channels/agents/tasks/extras/feedback/intelligence/skills/workflows/workflow-sessions/ws-handler）改为通过 `_helpers.ts` resolver 拿 per-project db
+- ✅ 系统模块（agents/engine、system-agents/*、workflows/runner、messaging/router）适配 per-project handle
+- ✅ 启动期 warm-up 所有 recent project；shutdown 关闭全部 db
+- ✅ 前端 `lib/api.ts` createProject 改调 /api/projects/open；新增 closeProject / deleteProjectStorage
+
+**Sprint B — UX 对齐 Close vs Delete（commit `21b146b`）**
+- ✅ OpenProjectDialog：调 /api/projects/open，区分 is_new / reopen；reopen 拉已存在 channels；新建 seed #general
+- ✅ ProjectSettingsPage Danger Zone 双按钮：Close（保留 .slark/）+ Delete .slark/（自定义模态需输入项目名 slug 校验）
+- ✅ Sidebar Switcher ⋯ 菜单加 "✕ Close" 项
+
+**Sprint C — Knowledge JSONL + 全局视图 + WS + 文档（本 commit）**
+- ✅ Knowledge Store：`config/knowledge-store.ts` 在 approve / reject / update 后整体重写 `<ws>/.slark/knowledge/{decisions,lessons}.jsonl`（仅 review_status='approved'）
+- ✅ 跨 project 全局视图聚合：`/api/inbox(workflow-runs)`、`/api/threads`、`/api/messages/search`、`/api/saved`、`/api/agents`、`/api/channels`、`/api/tasks`、`/api/skills` 全部走 `forEachProjectDb` 遍历 handle pool
+- ✅ projectsService.ensureReadme：自动生成 `.slark/README.md`（含目录结构、git 入仓建议）
+- ✅ WS 全局事件：`hub.broadcastGlobal()` + `ServerEvent` 新增 `project_list_changed` / `knowledge_updated`；前端 ws-bridge 收到后 refresh stores
+- ✅ 文档同步：`docs/technical-decisions.md` 新增 D-21 ~ D-25 + 版本 v1.2
+
+> 关键点：开发阶段**不向前兼容**（Q-12）。旧 `~/.slark/slark.db` 启动期检测仅 warn，不迁移；用户手动 `mv` 释放即可。
+> 验收：服务启动 0 错误 → POST /api/projects/open 创建 `<path>/.slark/{project.json,slark.db,.gitignore,README.md}` → GET /api/projects 从 projects.json 列出。
 
 ### Sprint 4-ext 已交付摘要（2026-04-30）
 

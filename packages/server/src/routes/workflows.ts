@@ -1,31 +1,10 @@
 /**
- * Workflows REST API（Sprint 2 CP1）
- *
- * 对齐：
- *   - docs/product-brief.md §D-4
- *   - docs/technical-decisions.md D-16
- *   - PLAN.md Sprint 2 §2.1 / §2.2
- *
- * Endpoints:
- *   GET    /api/projects/:id/workflows                列出该 project 的所有 workflows
- *   POST   /api/projects/:id/workflows                创建 workflow（YAML 由调用方提供）
- *   GET    /api/workflows/:id                         详情
- *   PATCH  /api/workflows/:id                         更新（name / description / trigger_command / definition_yaml）
- *   DELETE /api/workflows/:id                         删除
- *   GET    /api/workflows/:id/runs                    该 workflow 的执行历史
- *   GET    /api/workflow-runs/:id                     单次 run 详情
- *   POST   /api/workflow-runs/:id/abort               用户终止 run
- *   GET    /api/channels/:id/active-workflow-run      Channel 内当前活跃 run（thread 进度条）
- *
- * 注：runner 启动逻辑（POST start）由 MessageRouter 通过 /command 触发，本路由不暴露
- *     直接 start 端点（避免绕过指令防护）。
+ * Workflows REST API（D-21 重构）
  */
 
 import type { FastifyInstance } from 'fastify';
-import type { Database } from 'better-sqlite3';
 import {
   channelRepo,
-  projectRepo,
   responsibilityRepo,
   workflowRepo,
   workflowRunRepo,
@@ -33,26 +12,29 @@ import {
 import { parseWorkflowYaml, WorkflowYamlError } from '../workflows/yaml-parser.js';
 import { abortWorkflowRun } from '../workflows/runner.js';
 import { deriveResponsibilitiesForWorkflow } from '../workflows/derive-responsibilities.js';
+import {
+  dbForProjectId,
+  dbForResource,
+  forEachProjectDb,
+} from './_helpers.js';
 
 const COMMAND_RE = /^\/[a-z][a-z0-9-]*$/;
 
-export async function workflowRoutes(app: FastifyInstance, db: Database): Promise<void> {
-  // 列出 project 的 workflows
+export async function workflowRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/projects/:id/workflows', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const project = projectRepo.getById(db, id);
-    if (!project) {
+    const ctx = dbForProjectId(id);
+    if (!ctx) {
       reply.code(404);
       return { error: 'project not found' };
     }
-    return workflowRepo.listByProject(db, id);
+    return workflowRepo.list(ctx.db).map((w) => ({ ...w, project_id: ctx.projectId }));
   });
 
-  // 创建 workflow
   app.post('/api/projects/:id/workflows', async (req, reply) => {
     const { id: projectId } = req.params as { id: string };
-    const project = projectRepo.getById(db, projectId);
-    if (!project) {
+    const ctx = dbForProjectId(projectId);
+    if (!ctx) {
       reply.code(404);
       return { error: 'project not found' };
     }
@@ -75,8 +57,7 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
     if (!COMMAND_RE.test(body.trigger_command)) {
       reply.code(400);
       return {
-        error:
-          'trigger_command must match /^\\/[a-z][a-z0-9-]*$/ (e.g. "/new-feature")',
+        error: 'trigger_command must match /^\\/[a-z][a-z0-9-]*$/ (e.g. "/new-feature")',
       };
     }
     if (!body.definition_yaml || typeof body.definition_yaml !== 'string') {
@@ -84,7 +65,6 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
       return { error: 'definition_yaml is required' };
     }
 
-    // 解析 + 校验 YAML
     let definition;
     try {
       definition = parseWorkflowYaml(body.definition_yaml);
@@ -95,8 +75,6 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
       }
       throw e;
     }
-
-    // YAML 内 trigger.command 要与 body.trigger_command 一致
     if (definition.trigger.command !== body.trigger_command) {
       reply.code(400);
       return {
@@ -104,8 +82,7 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
       };
     }
 
-    // 同 project 内 trigger_command 唯一
-    const existing = workflowRepo.getByTrigger(db, projectId, body.trigger_command);
+    const existing = workflowRepo.getByTrigger(ctx.db, body.trigger_command);
     if (existing) {
       reply.code(409);
       return {
@@ -113,8 +90,7 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
       };
     }
 
-    const wf = workflowRepo.create(db, {
-      project_id: projectId,
+    const wf = workflowRepo.create(ctx.db, {
       name: body.name,
       description: body.description ?? null,
       trigger_command: body.trigger_command,
@@ -122,9 +98,8 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
       source: 'user',
     });
 
-    // CP1：自动 derive responsibilities
     try {
-      const res = deriveResponsibilitiesForWorkflow(db, wf.id);
+      const res = deriveResponsibilitiesForWorkflow(ctx.db, wf.id);
       if (res.unresolved.length > 0) {
         req.log.warn(
           { workflow: wf.name, unresolved: res.unresolved },
@@ -132,31 +107,36 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
         );
       }
     } catch (e) {
-      req.log.warn(
-        { err: e, workflow: wf.name },
-        '[workflows] failed to derive responsibilities',
-      );
+      req.log.warn({ err: e, workflow: wf.name }, '[workflows] derive failed');
     }
 
     reply.code(201);
-    return wf;
+    return { ...wf, project_id: ctx.projectId };
   });
 
-  // 详情
   app.get('/api/workflows/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const wf = workflowRepo.getById(db, id);
+    const ctx = dbForResource('workflows', id);
+    if (!ctx) {
+      reply.code(404);
+      return { error: 'workflow not found' };
+    }
+    const wf = workflowRepo.getById(ctx.db, id);
     if (!wf) {
       reply.code(404);
       return { error: 'workflow not found' };
     }
-    return wf;
+    return { ...wf, project_id: ctx.projectId };
   });
 
-  // 更新
   app.patch('/api/workflows/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const wf = workflowRepo.getById(db, id);
+    const ctx = dbForResource('workflows', id);
+    if (!ctx) {
+      reply.code(404);
+      return { error: 'workflow not found' };
+    }
+    const wf = workflowRepo.getById(ctx.db, id);
     if (!wf) {
       reply.code(404);
       return { error: 'workflow not found' };
@@ -167,24 +147,17 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
       trigger_command: string;
       definition_yaml: string;
     }>;
-
     if (body.trigger_command !== undefined && !COMMAND_RE.test(body.trigger_command)) {
       reply.code(400);
-      return {
-        error:
-          'trigger_command must match /^\\/[a-z][a-z0-9-]*$/ (e.g. "/new-feature")',
-      };
+      return { error: 'trigger_command must match /^\\/[a-z][a-z0-9-]*$/' };
     }
-
     if (body.definition_yaml !== undefined) {
       try {
         const def = parseWorkflowYaml(body.definition_yaml);
         const triggerCmd = body.trigger_command ?? wf.trigger_command;
         if (def.trigger.command !== triggerCmd) {
           reply.code(400);
-          return {
-            error: `trigger_command mismatch: ${triggerCmd} vs YAML ${def.trigger.command}`,
-          };
+          return { error: `trigger_command mismatch: ${triggerCmd} vs YAML ${def.trigger.command}` };
         }
       } catch (e) {
         if (e instanceof WorkflowYamlError) {
@@ -194,50 +167,43 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
         throw e;
       }
     }
-
     if (body.trigger_command !== undefined && body.trigger_command !== wf.trigger_command) {
-      const conflict = workflowRepo.getByTrigger(db, wf.project_id, body.trigger_command);
+      const conflict = workflowRepo.getByTrigger(ctx.db, body.trigger_command);
       if (conflict && conflict.id !== id) {
         reply.code(409);
-        return {
-          error: `trigger_command "${body.trigger_command}" already used by another workflow`,
-        };
+        return { error: `trigger_command "${body.trigger_command}" already used` };
       }
     }
-
-    const updated = workflowRepo.update(db, id, body);
-
-    // CP1：YAML 变化时重新 derive responsibilities
+    const updated = workflowRepo.update(ctx.db, id, body);
     if (updated && body.definition_yaml !== undefined) {
       try {
-        deriveResponsibilitiesForWorkflow(db, updated.id);
+        deriveResponsibilitiesForWorkflow(ctx.db, updated.id);
       } catch (e) {
-        req.log.warn(
-          { err: e, workflow: updated.name },
-          '[workflows] failed to re-derive responsibilities on update',
-        );
+        req.log.warn({ err: e, workflow: updated.name }, '[workflows] re-derive failed');
       }
     }
-
-    return updated;
+    return updated ? { ...updated, project_id: ctx.projectId } : null;
   });
 
-  // 删除
   app.delete('/api/workflows/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const wf = workflowRepo.getById(db, id);
-    if (!wf) {
+    const ctx = dbForResource('workflows', id);
+    if (!ctx) {
       reply.code(404);
       return { error: 'workflow not found' };
     }
-    workflowRepo.remove(db, id);
+    workflowRepo.remove(ctx.db, id);
     reply.code(204);
   });
 
-  // YAML 导出（CP4）
   app.get('/api/workflows/:id/export', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const wf = workflowRepo.getById(db, id);
+    const ctx = dbForResource('workflows', id);
+    if (!ctx) {
+      reply.code(404);
+      return { error: 'workflow not found' };
+    }
+    const wf = workflowRepo.getById(ctx.db, id);
     if (!wf) {
       reply.code(404);
       return { error: 'workflow not found' };
@@ -249,20 +215,13 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
     return wf.definition_yaml;
   });
 
-  // YAML 导入（CP4）
-  // body: { definition_yaml: string, name?: string, trigger_command?: string,
-  //         description?: string|null, overwrite?: boolean }
-  // - YAML 必须自带合法 trigger.command；body 的 trigger_command 可选 override
-  // - body.name 可选 override（默认用 YAML 顶层 name）
-  // - 同 project + trigger_command 已存在时：默认 409；overwrite=true 则 PATCH 覆盖
   app.post('/api/projects/:id/workflows/import', async (req, reply) => {
     const { id: projectId } = req.params as { id: string };
-    const project = projectRepo.getById(db, projectId);
-    if (!project) {
+    const ctx = dbForProjectId(projectId);
+    if (!ctx) {
       reply.code(404);
       return { error: 'project not found' };
     }
-
     const body = req.body as {
       definition_yaml?: string;
       name?: string;
@@ -270,12 +229,10 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
       trigger_command?: string;
       overwrite?: boolean;
     };
-
     if (!body?.definition_yaml || typeof body.definition_yaml !== 'string') {
       reply.code(400);
       return { error: 'definition_yaml is required' };
     }
-
     let definition;
     try {
       definition = parseWorkflowYaml(body.definition_yaml);
@@ -286,54 +243,42 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
       }
       throw e;
     }
-
     const triggerCommand = body.trigger_command ?? definition.trigger.command;
     if (!COMMAND_RE.test(triggerCommand)) {
       reply.code(400);
-      return {
-        error:
-          'trigger_command must match /^\\/[a-z][a-z0-9-]*$/ (e.g. "/new-feature")',
-      };
+      return { error: 'trigger_command must match /^\\/[a-z][a-z0-9-]*$/' };
     }
-    if (
-      body.trigger_command &&
-      definition.trigger.command !== body.trigger_command
-    ) {
+    if (body.trigger_command && definition.trigger.command !== body.trigger_command) {
       reply.code(400);
       return {
-        error: `trigger_command mismatch: body says "${body.trigger_command}" but YAML says "${definition.trigger.command}"`,
+        error: `trigger_command mismatch: body "${body.trigger_command}" vs YAML "${definition.trigger.command}"`,
       };
     }
-
     const name = body.name ?? definition.name;
     const description = body.description ?? definition.description ?? null;
-
-    const existing = workflowRepo.getByTrigger(db, projectId, triggerCommand);
-
+    const existing = workflowRepo.getByTrigger(ctx.db, triggerCommand);
     if (existing && !body.overwrite) {
       reply.code(409);
       return {
-        error: `trigger_command "${triggerCommand}" already exists in this project (workflow "${existing.name}"). Pass overwrite=true to replace.`,
-        existing,
+        error: `trigger_command "${triggerCommand}" already exists. Pass overwrite=true to replace.`,
+        existing: { ...existing, project_id: ctx.projectId },
       };
     }
-
     let wf;
     if (existing && body.overwrite) {
-      wf = workflowRepo.update(db, existing.id, {
+      wf = workflowRepo.update(ctx.db, existing.id, {
         name,
         description,
         trigger_command: triggerCommand,
         definition_yaml: body.definition_yaml,
       });
       try {
-        deriveResponsibilitiesForWorkflow(db, existing.id);
+        deriveResponsibilitiesForWorkflow(ctx.db, existing.id);
       } catch {
         /* ignore */
       }
     } else {
-      wf = workflowRepo.create(db, {
-        project_id: projectId,
+      wf = workflowRepo.create(ctx.db, {
         name,
         description,
         trigger_command: triggerCommand,
@@ -341,77 +286,84 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
         source: 'user',
       });
       try {
-        deriveResponsibilitiesForWorkflow(db, wf.id);
+        deriveResponsibilitiesForWorkflow(ctx.db, wf.id);
       } catch {
         /* ignore */
       }
     }
-
     reply.code(existing ? 200 : 201);
-    return { imported: wf, mode: existing ? 'updated' : 'created' };
+    return {
+      imported: wf ? { ...wf, project_id: ctx.projectId } : null,
+      mode: existing ? 'updated' : 'created',
+    };
   });
 
-  // 该 workflow 的执行历史
   app.get('/api/workflows/:id/runs', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const wf = workflowRepo.getById(db, id);
-    if (!wf) {
+    const ctx = dbForResource('workflows', id);
+    if (!ctx) {
       reply.code(404);
       return { error: 'workflow not found' };
     }
-    return workflowRunRepo.listByWorkflow(db, id);
+    return workflowRunRepo.listByWorkflow(ctx.db, id);
   });
 
-  // 该 workflow 的责任连接（CP1）
   app.get('/api/workflows/:id/responsibilities', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const wf = workflowRepo.getById(db, id);
-    if (!wf) {
+    const ctx = dbForResource('workflows', id);
+    if (!ctx) {
       reply.code(404);
       return { error: 'workflow not found' };
     }
-    return responsibilityRepo.listByWorkflow(db, id);
+    return responsibilityRepo.listByWorkflow(ctx.db, id);
   });
 
-  // 跨 project 活跃 runs（Inbox 视图用，CP2）
+  // 跨 project 活跃 runs（Inbox 视图）— 遍历所有打开的 db
   app.get('/api/workflow-runs', async (req) => {
     const query = req.query as {
       status?: 'running' | 'awaiting_approval' | 'completed' | 'aborted' | 'failed';
     };
-    const runs = workflowRunRepo.listActive(
-      db,
-      query.status ? { status: query.status } : undefined,
-    );
-    // 附上 workflow + channel 元数据，前端不用再 N+1 拉
-    return runs.map((r) => {
-      const wf = workflowRepo.getById(db, r.workflow_id);
-      const ch = channelRepo.getById(db, r.channel_id);
-      return {
-        ...r,
-        workflow: wf,
-        channel: ch,
-      };
+    return forEachProjectDb(({ db, projectId }) => {
+      const runs = workflowRunRepo.listActive(db, query.status ? { status: query.status } : undefined);
+      return runs.map((r) => {
+        const wf = workflowRepo.getById(db, r.workflow_id);
+        const ch = channelRepo.getById(db, r.channel_id);
+        return {
+          ...r,
+          project_id: projectId,
+          workflow: wf ? { ...wf, project_id: projectId } : null,
+          channel: ch ? { ...ch, project_id: projectId } : null,
+        };
+      });
     });
   });
 
-  // 单次 run 详情
   app.get('/api/workflow-runs/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const run = workflowRunRepo.getById(db, Number(id));
+    const ctx = dbForResource('workflow_runs', Number(id));
+    if (!ctx) {
+      reply.code(404);
+      return { error: 'workflow run not found' };
+    }
+    const run = workflowRunRepo.getById(ctx.db, Number(id));
     if (!run) {
       reply.code(404);
       return { error: 'workflow run not found' };
     }
-    const wf = workflowRepo.getById(db, run.workflow_id);
+    const wf = workflowRepo.getById(ctx.db, run.workflow_id);
     return { ...run, workflow: wf };
   });
 
-  // Abort run
   app.post('/api/workflow-runs/:id/abort', async (req, reply) => {
     const { id } = req.params as { id: string };
+    const ctx = dbForResource('workflow_runs', Number(id));
+    if (!ctx) {
+      reply.code(404);
+      return { error: 'workflow run not found' };
+    }
     const body = (req.body ?? {}) as { reason?: string };
     const runId = Number(id);
-    const run = workflowRunRepo.getById(db, runId);
+    const run = workflowRunRepo.getById(ctx.db, runId);
     if (!run) {
       reply.code(404);
       return { error: 'workflow run not found' };
@@ -420,22 +372,21 @@ export async function workflowRoutes(app: FastifyInstance, db: Database): Promis
       reply.code(409);
       return { error: `run is already ${run.status}` };
     }
-    abortWorkflowRun(db, runId, body.reason ?? 'aborted by user');
-    return workflowRunRepo.getById(db, runId);
+    abortWorkflowRun(ctx.db, runId, body.reason ?? 'aborted by user');
+    return workflowRunRepo.getById(ctx.db, runId);
   });
 
-  // Channel 内当前活跃 run（前端 Thread 顶部进度条用）
   app.get('/api/channels/:id/active-workflow-run', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const channel = channelRepo.getById(db, id);
-    if (!channel) {
+    const ctx = dbForResource('channels', id);
+    if (!ctx) {
       reply.code(404);
       return { error: 'channel not found' };
     }
     const query = req.query as { thread_id?: string };
-    const run = workflowRunRepo.getActive(db, id, query.thread_id ?? null);
+    const run = workflowRunRepo.getActive(ctx.db, id, query.thread_id ?? null);
     if (!run) return { run: null };
-    const wf = workflowRepo.getById(db, run.workflow_id);
+    const wf = workflowRepo.getById(ctx.db, run.workflow_id);
     return { run: { ...run, workflow: wf } };
   });
 }

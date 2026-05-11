@@ -22,7 +22,6 @@ import {
 } from '@slark/shared';
 import {
   agentRepo,
-  channelRepo,
   messageRepo,
   taskRepo,
   workflowRepo,
@@ -361,10 +360,8 @@ async function handleCommand(input: {
     return handleControlCommand({ db, logger, channelId, threadId, cmd });
   }
 
-  // 普通命令 → 看是否匹配 workflow trigger
-  const channel = channelRepo.getById(db, channelId);
-  if (!channel?.project_id) return false;
-  const wf = workflowRepo.getByTrigger(db, channel.project_id, cmd.name);
+  // 普通命令 → 看是否匹配 workflow trigger（per-project db 内）
+  const wf = workflowRepo.getByTrigger(db, cmd.name);
   if (!wf) return false;
 
   try {
@@ -529,19 +526,15 @@ async function manualSediment(input: {
   reason?: string;
 }): Promise<void> {
   const { db, channelId, threadId, reason } = input;
-  const channel = channelRepo.getById(db, channelId);
-  if (!channel?.project_id) return;
-
   const threadMessages = messageRepo.listThread(db, threadId);
   if (threadMessages.length === 0) return;
-  const projectAgents = agentRepo.listByProject(db, channel.project_id);
+  const projectAgents = agentRepo.list(db);
   const roleMap: Record<string, string> = {};
   for (const a of projectAgents) {
     roleMap[a.id] = a.name;
   }
 
   const output = await runScribe({
-    project_id: channel.project_id,
     trigger: { kind: 'manual', reason },
     thread_messages: threadMessages,
     agent_role_map: roleMap,
@@ -559,7 +552,7 @@ async function manualSediment(input: {
 
   // 找该 thread 上是否绑定了 workflow_run；有则关联
   const run = workflowRunRepo.getActive(db, channelId, threadId);
-  const persisted = persistScribeOutput(db, channel.project_id, output, {
+  const persisted = persistScribeOutput(db, output, {
     source_run_id: run?.id ?? null,
   });
   emitInfoMessage(

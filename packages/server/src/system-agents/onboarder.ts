@@ -14,10 +14,11 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ONBOARDER_TIMEOUT_MS } from '@slark/shared';
+import type { Project } from '@slark/shared';
 import type { Database } from 'better-sqlite3';
 import { createCursorAdapter } from '../agents/adapter-factory.js';
 import { runWithAdapter } from '../agents/runner.js';
-import { onboardingRepo, projectRepo } from '../db/repos.js';
+import { onboardingRepo } from '../db/repos.js';
 
 interface OnboarderLogger {
   info: (msg: string) => void;
@@ -31,12 +32,9 @@ const consoleLog: OnboarderLogger = {
 
 export async function runOnboarderForProject(
   db: Database,
-  projectId: string,
+  project: Project,
   logger: OnboarderLogger = consoleLog,
 ): Promise<void> {
-  const project = projectRepo.getById(db, projectId);
-  if (!project) throw new Error(`project ${projectId} not found`);
-
   // 1. 收集 workspace 信息（文件读取出错时 graceful 降级）
   const ws = project.workspace_path;
   let readme = '';
@@ -63,7 +61,6 @@ export async function runOnboarderForProject(
   const install = await adapter.checkInstallation();
   if (!install.installed || (!readme && !pkgJson && recentCommits.length === 0)) {
     onboardingRepo.upsert(db, {
-      project_id: projectId,
       overview: project.goal,
       tech_stack: deriveQuickStack(pkgJson),
       conventions: null,
@@ -83,7 +80,6 @@ export async function runOnboarderForProject(
     if (result.timedOut || result.aborted) {
       logger.warn(`[onboarder] ${project.name}: timed out / aborted; using fallback`);
       onboardingRepo.upsert(db, {
-        project_id: projectId,
         overview: project.goal,
         tech_stack: deriveQuickStack(pkgJson),
         conventions: null,
@@ -94,7 +90,6 @@ export async function runOnboarderForProject(
     if (!parsed) {
       logger.warn(`[onboarder] ${project.name}: unparseable output; using fallback`);
       onboardingRepo.upsert(db, {
-        project_id: projectId,
         overview: project.goal,
         tech_stack: deriveQuickStack(pkgJson),
         conventions: null,
@@ -102,7 +97,6 @@ export async function runOnboarderForProject(
       return;
     }
     onboardingRepo.upsert(db, {
-      project_id: projectId,
       overview: parsed.overview,
       tech_stack: parsed.tech_stack,
       conventions: parsed.conventions,

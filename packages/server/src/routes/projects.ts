@@ -1,38 +1,41 @@
 /**
- * Projects REST API（Sprint 1 Checkpoint 2）
+ * Projects REST API（D-21 重构）
  *
- * 对齐：
- *   - docs/product-brief.md §D-2 / §D-3 / §D-14
- *   - docs/technical-decisions.md D-13 / D-14
+ * Per-Project Storage 后的 API 形态：
+ *   GET    /api/projects                       — 列出 ~/.slark/projects.json 中的全部 recent
+ *   GET    /api/projects/:id                   — 单个项目（id = nanoid，存于 project.json）
+ *   GET    /api/projects/by-name/:name         — 按 slug 查
+ *   POST   /api/projects/open                  — 打开 / 创建 project（Cursor 风格 open folder）
+ *   PATCH  /api/projects/:id                   — 改 project.json 元数据
+ *   POST   /api/projects/:id/close             — 仅从 recent 移除（保留 .slark/）
+ *   POST   /api/projects/:id/delete-storage    — rm -rf <path>/.slark/（不可撤销）
+ *   GET    /api/projects/:id/onboarding        — 当前 onboarding 摘要
+ *   POST   /api/projects/:id/onboarding/run    — 触发 Onboarder 重新生成
+ *   POST   /api/projects/suggest-team          — Team Architect（无 project 创建依赖）
  *
- * 约束：
- *   - name：URL slug，`^[a-z0-9_-]+$`，唯一
- *   - workspace_path：必填（D-8 无兜底）
- *   - goal：必填，最长 GOAL_MAX_LENGTH 字符（Q-3 决议）
- *
- * 不包含在本 Checkpoint：
- *   - POST /api/projects/:id/suggest-team（Team Architect，见 Checkpoint 4）
- *   - 级联操作 GET /api/projects/:id/channels 暂时放在 channel.project_id 过渡完成后再开
+ * 历史 POST /api/projects（带向导字段）由 OpenProjectDialog 走 /open 替代。
+ * 历史 DELETE /api/projects/:id 由 /close 与 /delete-storage 双按钮替代（Q-11）。
  */
 
 import type { FastifyInstance } from 'fastify';
-import type { Database } from 'better-sqlite3';
 import { GOAL_MAX_LENGTH } from '@slark/shared';
-import { onboardingRepo, projectRepo } from '../db/repos.js';
+import { onboardingRepo } from '../db/repos.js';
+import { closeProjectDb, openProjectDb } from '../db/index.js';
+import { projectsService } from '../config/projects-service.js';
 import { suggestTeam } from '../system-agents/team-architect.js';
 import { runOnboarderForProject } from '../system-agents/onboarder.js';
 import { importBuiltinsForProject } from '../workflows/builtin-import.js';
+import { hub } from '../ws/hub.js';
 
 const NAME_SLUG_RE = /^[a-z0-9_-]+$/;
 
-export async function projectRoutes(app: FastifyInstance, db: Database): Promise<void> {
-  // 列表
-  app.get('/api/projects', async () => projectRepo.list(db));
+export async function projectRoutes(app: FastifyInstance): Promise<void> {
+  // ---------- list ----------
+  app.get('/api/projects', async () => projectsService.list());
 
-  // 详情
   app.get('/api/projects/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const p = projectRepo.getById(db, id);
+    const p = projectsService.getById(id);
     if (!p) {
       reply.code(404);
       return { error: 'project not found' };
@@ -40,10 +43,9 @@ export async function projectRoutes(app: FastifyInstance, db: Database): Promise
     return p;
   });
 
-  // 按 name (slug) 查询
   app.get('/api/projects/by-name/:name', async (req, reply) => {
     const { name } = req.params as { name: string };
-    const p = projectRepo.getByName(db, name);
+    const p = projectsService.getByName(name);
     if (!p) {
       reply.code(404);
       return { error: 'project not found' };
@@ -51,120 +53,127 @@ export async function projectRoutes(app: FastifyInstance, db: Database): Promise
     return p;
   });
 
-  // 创建
-  app.post('/api/projects', async (req, reply) => {
+  // ---------- open / create ----------
+  app.post('/api/projects/open', async (req, reply) => {
     const body = req.body as {
-      id?: string;
+      workspace_path?: string;
       name?: string;
       display_name?: string | null;
-      workspace_path?: string;
       goal?: string;
       team_rules?: string | null;
       color?: string | null;
     };
-
-    // 校验
-    if (!body?.name || typeof body.name !== 'string') {
+    if (!body?.workspace_path || typeof body.workspace_path !== 'string') {
       reply.code(400);
-      return { error: 'name is required' };
+      return { error: 'workspace_path is required' };
     }
-    if (!NAME_SLUG_RE.test(body.name)) {
+    if (body.name !== undefined && !NAME_SLUG_RE.test(body.name)) {
       reply.code(400);
       return {
         error: 'name must be URL-safe: lowercase letters, digits, "-" and "_" only',
       };
     }
-    if (!body.workspace_path || typeof body.workspace_path !== 'string') {
-      reply.code(400);
-      return { error: 'workspace_path is required' };
-    }
-    if (!body.goal || typeof body.goal !== 'string') {
-      reply.code(400);
-      return { error: 'goal is required' };
-    }
-    if (body.goal.length > GOAL_MAX_LENGTH) {
+    if (body.goal !== undefined && body.goal.length > GOAL_MAX_LENGTH) {
       reply.code(400);
       return {
         error: `goal too long: ${body.goal.length} > ${GOAL_MAX_LENGTH} chars`,
       };
     }
 
-    // 重名
-    if (projectRepo.getByName(db, body.name)) {
-      reply.code(409);
-      return { error: `project with name "${body.name}" already exists` };
-    }
-
-    const project = projectRepo.create(db, {
-      id: body.id,
-      name: body.name,
-      display_name: body.display_name ?? null,
-      workspace_path: body.workspace_path,
-      goal: body.goal,
-      team_rules: body.team_rules ?? null,
-      color: body.color ?? null,
-    });
-
-    // CP2：自动 seed 内置 workflow 模板（feature-development / bug-fix / research）
+    let result: ReturnType<typeof projectsService.open>;
     try {
-      const importRes = importBuiltinsForProject(db, project.id);
-      req.log.info(
-        { project_id: project.id, ...importRes },
-        '[workflows] builtin templates imported',
-      );
+      result = projectsService.open({
+        workspace_path: body.workspace_path,
+        name: body.name,
+        display_name: body.display_name ?? null,
+        goal: body.goal,
+        team_rules: body.team_rules ?? null,
+        color: body.color ?? null,
+      });
     } catch (e) {
-      req.log.warn(
-        { err: e, project_id: project.id },
-        '[workflows] failed to import builtin templates',
-      );
+      reply.code(400);
+      return { error: (e as Error).message };
     }
 
-    // Sprint 6 CP3：异步触发 Onboarder（不阻塞 Project 创建响应）
-    void runOnboarderForProject(db, project.id, {
-      info: (m) => req.log.info(m),
-      warn: (m) => req.log.warn(m),
-    }).catch((e: Error) => req.log.warn(`[onboarder] ${e.message}`));
+    // 触发 per-project db 创建
+    const db = openProjectDb(result.project.workspace_path);
 
-    reply.code(201);
-    return project;
+    if (result.isNew) {
+      // 新建 project：seed builtin workflows + 异步触发 onboarder + 写 .gitignore
+      try {
+        const importRes = importBuiltinsForProject(db);
+        req.log.info(
+          { project_id: result.project.id, ...importRes },
+          '[workflows] builtin templates imported',
+        );
+      } catch (e) {
+        req.log.warn(
+          { err: e, project_id: result.project.id },
+          '[workflows] failed to import builtin templates',
+        );
+      }
+      void runOnboarderForProject(db, result.project, {
+        info: (m) => req.log.info(m),
+        warn: (m) => req.log.warn(m),
+      }).catch((e: Error) => req.log.warn(`[onboarder] ${e.message}`));
+      try {
+        projectsService.ensureGitignore(result.project.workspace_path);
+      } catch (e) {
+        req.log.warn(`[projects] ensureGitignore failed: ${(e as Error).message}`);
+      }
+      try {
+        projectsService.ensureReadme(result.project.workspace_path);
+      } catch (e) {
+        req.log.warn(`[projects] ensureReadme failed: ${(e as Error).message}`);
+      }
+    }
+
+    hub.broadcastGlobal({ type: 'project_list_changed', reason: 'opened' });
+
+    reply.code(result.isNew ? 201 : 200);
+    return { project: result.project, is_new: result.isNew };
   });
 
-  // GET / POST onboarding（Sprint 6 CP3）
+  // ---------- onboarding ----------
   app.get('/api/projects/:id/onboarding', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (!projectRepo.getById(db, id)) {
+    const p = projectsService.getById(id);
+    if (!p) {
       reply.code(404);
       return { error: 'project not found' };
     }
-    const onb = onboardingRepo.getByProject(db, id);
-    return onb ?? { project_id: id, ready: false };
+    const db = openProjectDb(p.workspace_path);
+    const onb = onboardingRepo.get(db);
+    return onb ? { ...onb, project_id: p.id } : { project_id: p.id, ready: false };
   });
 
   app.post('/api/projects/:id/onboarding/run', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (!projectRepo.getById(db, id)) {
+    const p = projectsService.getById(id);
+    if (!p) {
       reply.code(404);
       return { error: 'project not found' };
     }
+    const db = openProjectDb(p.workspace_path);
     try {
-      await runOnboarderForProject(db, id, {
+      await runOnboarderForProject(db, p, {
         info: (m) => req.log.info(m),
         warn: (m) => req.log.warn(m),
       });
-      return onboardingRepo.getByProject(db, id);
+      const got = onboardingRepo.get(db);
+      return got ? { ...got, project_id: p.id } : null;
     } catch (e) {
       reply.code(500);
       return { error: (e as Error).message };
     }
   });
 
-  // 更新
+  // ---------- update ----------
   app.patch('/api/projects/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = req.body as Partial<{
       name: string;
       display_name: string | null;
-      workspace_path: string;
       goal: string;
       team_rules: string | null;
       color: string | null;
@@ -186,51 +195,65 @@ export async function projectRoutes(app: FastifyInstance, db: Database): Promise
         error: `goal too long: ${body.goal.length} > ${GOAL_MAX_LENGTH} chars`,
       };
     }
-    // 重名冲突检查
     if (body.name) {
-      const existing = projectRepo.getByName(db, body.name);
+      const existing = projectsService.getByName(body.name);
       if (existing && existing.id !== id) {
         reply.code(409);
         return { error: `project with name "${body.name}" already exists` };
       }
     }
 
-    const p = projectRepo.update(db, id, body);
+    const p = projectsService.update(id, body);
     if (!p) {
       reply.code(404);
       return { error: 'project not found' };
     }
+    hub.broadcastGlobal({ type: 'project_list_changed', reason: 'updated' });
     return p;
   });
 
-  // 删除（级联 channels / agents / messages / tasks）
-  app.delete('/api/projects/:id', async (req, reply) => {
+  // ---------- close (Q-11) ----------
+  app.post('/api/projects/:id/close', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const p = projectRepo.getById(db, id);
+    const p = projectsService.getById(id);
     if (!p) {
       reply.code(404);
       return { error: 'project not found' };
     }
-    projectRepo.remove(db, id);
+    closeProjectDb(p.workspace_path);
+    projectsService.close(id);
+    hub.broadcastGlobal({ type: 'project_list_changed', reason: 'closed' });
     reply.code(204);
   });
 
-  // -----------------------------------------------------------------------
-  // POST /api/projects/suggest-team
-  //
-  // Team Architect System Agent（D-15 / D-19）：从 Goal 推导推荐 Team。
-  // 该端点**不需要**已存在的 Project（Create Project 向导 Step 2 调用），
-  // 直接传 goal + workspace_path。
-  //
-  // Q-2 / Review 5 兜底：未安装 / 超时 / 解析失败时返回固定三件套（runtime 空）。
-  // -----------------------------------------------------------------------
+  // ---------- delete-storage (Q-11) ----------
+  app.post('/api/projects/:id/delete-storage', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as { confirm_name?: string };
+    const p = projectsService.getById(id);
+    if (!p) {
+      reply.code(404);
+      return { error: 'project not found' };
+    }
+    if (body.confirm_name !== p.name) {
+      reply.code(400);
+      return {
+        error: `confirm_name must equal "${p.name}" to delete this project's .slark/ storage`,
+      };
+    }
+    closeProjectDb(p.workspace_path);
+    projectsService.deleteStorage(id);
+    hub.broadcastGlobal({ type: 'project_list_changed', reason: 'deleted' });
+    reply.code(204);
+  });
+
+  // ---------- suggest-team（无 project 创建依赖）----------
   app.post('/api/projects/suggest-team', async (req, reply) => {
     const body = req.body as {
       goal?: string;
       workspace_path?: string;
       workspace_hint?: { stack?: string; readme_excerpt?: string };
     };
-
     if (!body?.goal || typeof body.goal !== 'string') {
       reply.code(400);
       return { error: 'goal is required' };

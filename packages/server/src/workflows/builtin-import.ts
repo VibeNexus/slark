@@ -16,15 +16,12 @@ export interface ImportResult {
   errors: Array<{ command: string; reason: string }>;
 }
 
-export function importBuiltinsForProject(
-  db: Database,
-  projectId: string,
-): ImportResult {
+export function importBuiltinsForProject(db: Database): ImportResult {
   const result: ImportResult = { imported: 0, skipped: 0, errors: [] };
 
   for (const tpl of BUILTIN_TEMPLATES) {
     // 已存在同 trigger 则跳过（用户可能已编辑过）
-    const existing = workflowRepo.getByTrigger(db, projectId, tpl.command);
+    const existing = workflowRepo.getByTrigger(db, tpl.command);
     if (existing) {
       result.skipped += 1;
       continue;
@@ -40,7 +37,6 @@ export function importBuiltinsForProject(
     }
 
     workflowRepo.create(db, {
-      project_id: projectId,
       name: tpl.name,
       description: tpl.description,
       trigger_command: tpl.command,

@@ -80,6 +80,11 @@ export const listProjects = () => request<Project[]>('/api/projects');
 export const getProject = (id: string) => request<Project>(`/api/projects/${id}`);
 export const getProjectByName = (name: string) =>
   request<Project>(`/api/projects/by-name/${encodeURIComponent(name)}`);
+/**
+ * D-21：POST /api/projects/open 替代旧 POST /api/projects。
+ * 服务端检测 <workspace>/.slark/ 是否已存在 → reopen 或新建。
+ * 保留 createProject 函数名供既有调用者用。
+ */
 export const createProject = (data: {
   id?: string;
   name: string;
@@ -89,17 +94,25 @@ export const createProject = (data: {
   team_rules?: string | null;
   color?: string | null;
 }) =>
-  request<Project>('/api/projects', {
+  request<{ project: Project; is_new: boolean }>('/api/projects/open', {
     method: 'POST',
     body: JSON.stringify(data),
-  });
+  }).then((res) => res.project);
 export const updateProject = (id: string, patch: Partial<Project>) =>
   request<Project>(`/api/projects/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(patch),
   });
-export const deleteProject = (id: string) =>
-  request<void>(`/api/projects/${id}`, { method: 'DELETE' });
+/** D-21：close = 仅从 recent 移除（保留 .slark/）；delete-storage = rm -rf .slark/ */
+export const closeProject = (id: string) =>
+  request<void>(`/api/projects/${id}/close`, { method: 'POST' });
+export const deleteProjectStorage = (id: string, confirmName: string) =>
+  request<void>(`/api/projects/${id}/delete-storage`, {
+    method: 'POST',
+    body: JSON.stringify({ confirm_name: confirmName }),
+  });
+/** 兼容旧调用：等价于 closeProject（开发阶段 UX 改造前）*/
+export const deleteProject = closeProject;
 
 // Team Architect（Create Project Step 2 用）
 export const suggestTeam = (data: {

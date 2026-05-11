@@ -27,7 +27,6 @@ import type {
   LessonKind,
   MessageMetadata,
   ObservationPolarity,
-  Project,
   ProjectOnboarding,
   Responsibility,
   ResponsibilityAuthority,
@@ -52,125 +51,10 @@ import { ACTIVITY_RETENTION_PER_AGENT } from '@slark/shared';
 const now = (): number => Date.now();
 
 // =============================================================================
-// Projects (v1.0)
+// Projects（D-21）：项目元数据已迁移到 <workspace>/.slark/project.json，
+// 不再存放在 SQLite。本文件不再 export projectRepo；改用 config/project-meta.ts +
+// config/projects-store.ts。
 // =============================================================================
-
-interface ProjectRow {
-  id: string;
-  name: string;
-  display_name: string | null;
-  workspace_path: string;
-  goal: string;
-  team_rules: string | null;
-  color: string | null;
-  created_at: number;
-}
-
-function rowToProject(r: ProjectRow): Project {
-  return { ...r };
-}
-
-export const projectRepo = {
-  list(db: Database): Project[] {
-    return (
-      db.prepare('SELECT * FROM projects ORDER BY created_at ASC').all() as ProjectRow[]
-    ).map(rowToProject);
-  },
-
-  getById(db: Database, id: string): Project | null {
-    const row = db
-      .prepare('SELECT * FROM projects WHERE id = ?')
-      .get(id) as ProjectRow | undefined;
-    return row ? rowToProject(row) : null;
-  },
-
-  getByName(db: Database, name: string): Project | null {
-    const row = db
-      .prepare('SELECT * FROM projects WHERE name = ?')
-      .get(name) as ProjectRow | undefined;
-    return row ? rowToProject(row) : null;
-  },
-
-  create(
-    db: Database,
-    input: {
-      id?: string;
-      name: string;
-      display_name?: string | null;
-      workspace_path: string;
-      goal: string;
-      team_rules?: string | null;
-      color?: string | null;
-    },
-  ): Project {
-    const id = input.id ?? nanoid();
-    const ts = now();
-    db.prepare(
-      `INSERT INTO projects (id, name, display_name, workspace_path, goal, team_rules, color, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      id,
-      input.name,
-      input.display_name ?? null,
-      input.workspace_path,
-      input.goal,
-      input.team_rules ?? null,
-      input.color ?? null,
-      ts,
-    );
-    return {
-      id,
-      name: input.name,
-      display_name: input.display_name ?? null,
-      workspace_path: input.workspace_path,
-      goal: input.goal,
-      team_rules: input.team_rules ?? null,
-      color: input.color ?? null,
-      created_at: ts,
-    };
-  },
-
-  update(
-    db: Database,
-    id: string,
-    patch: Partial<Omit<Project, 'id' | 'created_at'>>,
-  ): Project | null {
-    const fields: string[] = [];
-    const values: unknown[] = [];
-    if (patch.name !== undefined) {
-      fields.push('name = ?');
-      values.push(patch.name);
-    }
-    if (patch.display_name !== undefined) {
-      fields.push('display_name = ?');
-      values.push(patch.display_name);
-    }
-    if (patch.workspace_path !== undefined) {
-      fields.push('workspace_path = ?');
-      values.push(patch.workspace_path);
-    }
-    if (patch.goal !== undefined) {
-      fields.push('goal = ?');
-      values.push(patch.goal);
-    }
-    if (patch.team_rules !== undefined) {
-      fields.push('team_rules = ?');
-      values.push(patch.team_rules);
-    }
-    if (patch.color !== undefined) {
-      fields.push('color = ?');
-      values.push(patch.color);
-    }
-    if (!fields.length) return this.getById(db, id);
-    values.push(id);
-    db.prepare(`UPDATE projects SET ${fields.join(', ')} WHERE id = ?`).run(...values);
-    return this.getById(db, id);
-  },
-
-  remove(db: Database, id: string): void {
-    db.prepare('DELETE FROM projects WHERE id = ?').run(id);
-  },
-};
 
 // =============================================================================
 // Channels
@@ -181,7 +65,6 @@ interface ChannelRow {
   name: string;
   description: string | null;
   type: 'channel' | 'dm';
-  project_id: string | null;
   created_at: number;
 }
 
@@ -191,7 +74,7 @@ function rowToChannel(r: ChannelRow): Channel {
     name: r.name,
     description: r.description,
     type: r.type,
-    project_id: r.project_id,
+    project_id: null, // D-21：per-project db 内本来只有一个 project，project_id 由 server 注入
     created_at: r.created_at,
   };
 }
@@ -200,15 +83,6 @@ export const channelRepo = {
   list(db: Database): Channel[] {
     return (db.prepare('SELECT * FROM channels ORDER BY created_at ASC').all() as ChannelRow[])
       .map(rowToChannel);
-  },
-
-  /** v1.0 新增：按 Project 过滤列表 */
-  listByProject(db: Database, projectId: string): Channel[] {
-    return (
-      db
-        .prepare('SELECT * FROM channels WHERE project_id = ? ORDER BY created_at ASC')
-        .all(projectId) as ChannelRow[]
-    ).map(rowToChannel);
   },
 
   getById(db: Database, id: string): Channel | null {
@@ -223,27 +97,19 @@ export const channelRepo = {
       name: string;
       description?: string | null;
       type: 'channel' | 'dm';
-      project_id?: string | null;
     },
   ): Channel {
     const id = input.id ?? nanoid();
     const ts = now();
     db.prepare(
-      'INSERT INTO channels (id, name, description, type, project_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run(
-      id,
-      input.name,
-      input.description ?? null,
-      input.type,
-      input.project_id ?? null,
-      ts,
-    );
+      'INSERT INTO channels (id, name, description, type, created_at) VALUES (?, ?, ?, ?, ?)',
+    ).run(id, input.name, input.description ?? null, input.type, ts);
     return {
       id,
       name: input.name,
       description: input.description ?? null,
       type: input.type,
-      project_id: input.project_id ?? null,
+      project_id: null,
       created_at: ts,
     };
   },
@@ -289,7 +155,6 @@ interface AgentRow {
   thinking: number | null;
   context: string | null;
   env_vars_json: string | null;
-  project_id: string | null;
   created_at: number;
 }
 
@@ -305,7 +170,7 @@ function rowToAgent(r: AgentRow): Agent {
     thinking: r.thinking === null ? null : r.thinking === 1,
     context: r.context as Agent['context'],
     env_vars: r.env_vars_json ? (JSON.parse(r.env_vars_json) as Record<string, string>) : {},
-    project_id: r.project_id,
+    project_id: null, // D-21：per-project db 内的 agent 都属于该 project
     created_at: r.created_at,
   };
 }
@@ -339,7 +204,6 @@ export const agentRepo = {
       thinking?: boolean | null;
       context?: Agent['context'];
       env_vars?: Record<string, string>;
-      project_id?: string | null;
     },
   ): Agent {
     const id = input.id ?? nanoid();
@@ -351,8 +215,8 @@ export const agentRepo = {
           ? 1
           : 0;
     db.prepare(
-      `INSERT INTO agents (id, name, avatar, description, runtime, model, reasoning, thinking, context, env_vars_json, project_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO agents (id, name, avatar, description, runtime, model, reasoning, thinking, context, env_vars_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       input.name,
@@ -364,7 +228,6 @@ export const agentRepo = {
       thinkingInt,
       input.context ?? null,
       input.env_vars ? JSON.stringify(input.env_vars) : null,
-      input.project_id ?? null,
       ts,
     );
     return {
@@ -378,18 +241,9 @@ export const agentRepo = {
       thinking: input.thinking ?? null,
       context: input.context ?? null,
       env_vars: input.env_vars ?? {},
-      project_id: input.project_id ?? null,
+      project_id: null,
       created_at: ts,
     };
-  },
-
-  /** v1.0 新增：按 Project 过滤 */
-  listByProject(db: Database, projectId: string): Agent[] {
-    return (
-      db
-        .prepare('SELECT * FROM agents WHERE project_id = ? ORDER BY created_at ASC')
-        .all(projectId) as AgentRow[]
-    ).map(rowToAgent);
   },
 
   update(
@@ -948,7 +802,6 @@ export const agentRunRepo = {
 
 interface WorkflowRow {
   id: string;
-  project_id: string;
   name: string;
   description: string | null;
   trigger_command: string;
@@ -961,7 +814,7 @@ interface WorkflowRow {
 function rowToWorkflow(r: WorkflowRow): Workflow {
   return {
     id: r.id,
-    project_id: r.project_id,
+    project_id: '', // D-21：per-project db 内 workflow 都属于该 project；server 注入真实 id
     name: r.name,
     description: r.description,
     trigger_command: r.trigger_command,
@@ -978,14 +831,6 @@ export const workflowRepo = {
       .map(rowToWorkflow);
   },
 
-  listByProject(db: Database, projectId: string): Workflow[] {
-    return (
-      db
-        .prepare('SELECT * FROM workflows WHERE project_id = ? ORDER BY created_at ASC')
-        .all(projectId) as WorkflowRow[]
-    ).map(rowToWorkflow);
-  },
-
   getById(db: Database, id: string): Workflow | null {
     const row = db.prepare('SELECT * FROM workflows WHERE id = ?').get(id) as
       | WorkflowRow
@@ -993,11 +838,11 @@ export const workflowRepo = {
     return row ? rowToWorkflow(row) : null;
   },
 
-  /** 按 project + trigger 查（用于 MessageRouter 命令分发）*/
-  getByTrigger(db: Database, projectId: string, triggerCommand: string): Workflow | null {
+  /** 按 trigger 查（用于 MessageRouter 命令分发）*/
+  getByTrigger(db: Database, triggerCommand: string): Workflow | null {
     const row = db
-      .prepare('SELECT * FROM workflows WHERE project_id = ? AND trigger_command = ?')
-      .get(projectId, triggerCommand) as WorkflowRow | undefined;
+      .prepare('SELECT * FROM workflows WHERE trigger_command = ?')
+      .get(triggerCommand) as WorkflowRow | undefined;
     return row ? rowToWorkflow(row) : null;
   },
 
@@ -1005,7 +850,6 @@ export const workflowRepo = {
     db: Database,
     input: {
       id?: string;
-      project_id: string;
       name: string;
       description?: string | null;
       trigger_command: string;
@@ -1016,11 +860,10 @@ export const workflowRepo = {
     const id = input.id ?? nanoid();
     const ts = now();
     db.prepare(
-      `INSERT INTO workflows (id, project_id, name, description, trigger_command, definition_yaml, source, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO workflows (id, name, description, trigger_command, definition_yaml, source, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
-      input.project_id,
       input.name,
       input.description ?? null,
       input.trigger_command,
@@ -1333,7 +1176,6 @@ export const responsibilityRepo = {
 
 interface DecisionRow {
   id: number;
-  project_id: string;
   title: string;
   body: string;
   audience: string;
@@ -1349,7 +1191,7 @@ interface DecisionRow {
 function rowToDecision(r: DecisionRow): Decision {
   return {
     id: r.id,
-    project_id: r.project_id,
+    project_id: '', // D-21：per-project db 内的 decision 都属于该 project
     title: r.title,
     body: r.body,
     audience: r.audience,
@@ -1364,25 +1206,22 @@ function rowToDecision(r: DecisionRow): Decision {
 }
 
 export const decisionRepo = {
-  listByProject(
+  list(
     db: Database,
-    projectId: string,
     opts?: { review_status?: ReviewStatus; limit?: number },
   ): Decision[] {
-    const where: string[] = ['project_id = ?'];
-    const params: unknown[] = [projectId];
+    const where: string[] = [];
+    const params: unknown[] = [];
     if (opts?.review_status) {
       where.push('review_status = ?');
       params.push(opts.review_status);
     }
     const limit = opts?.limit ?? 200;
     params.push(limit);
-    const rows = db
-      .prepare(
-        `SELECT * FROM decisions WHERE ${where.join(' AND ')}
-         ORDER BY created_at DESC LIMIT ?`,
-      )
-      .all(...params) as DecisionRow[];
+    const sql = where.length
+      ? `SELECT * FROM decisions WHERE ${where.join(' AND ')} ORDER BY created_at DESC LIMIT ?`
+      : `SELECT * FROM decisions ORDER BY created_at DESC LIMIT ?`;
+    const rows = db.prepare(sql).all(...params) as DecisionRow[];
     return rows.map(rowToDecision);
   },
 
@@ -1396,7 +1235,6 @@ export const decisionRepo = {
   create(
     db: Database,
     input: {
-      project_id: string;
       title: string;
       body: string;
       audience?: string;
@@ -1410,11 +1248,10 @@ export const decisionRepo = {
     const ts = now();
     const result = db
       .prepare(
-        `INSERT INTO decisions (project_id, title, body, audience, source_run_id, source_message_id, confidence, review_status, recorded_by, created_at, reviewed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO decisions (title, body, audience, source_run_id, source_message_id, confidence, review_status, recorded_by, created_at, reviewed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
-        input.project_id,
         input.title,
         input.body,
         input.audience ?? 'all',
@@ -1467,7 +1304,6 @@ export const decisionRepo = {
 
 interface LessonRow {
   id: number;
-  project_id: string;
   kind: string;
   title: string;
   body: string;
@@ -1495,7 +1331,7 @@ function rowToLesson(r: LessonRow): Lesson {
   }
   return {
     id: r.id,
-    project_id: r.project_id,
+    project_id: '', // D-21：per-project db 内的 lesson 都属于该 project
     kind: r.kind as LessonKind,
     title: r.title,
     body: r.body,
@@ -1513,9 +1349,8 @@ function rowToLesson(r: LessonRow): Lesson {
 }
 
 export const lessonRepo = {
-  listByProject(
+  list(
     db: Database,
-    projectId: string,
     opts?: {
       review_status?: ReviewStatus;
       audience?: string;
@@ -1523,8 +1358,8 @@ export const lessonRepo = {
       limit?: number;
     },
   ): Lesson[] {
-    const where: string[] = ['project_id = ?'];
-    const params: unknown[] = [projectId];
+    const where: string[] = [];
+    const params: unknown[] = [];
     if (opts?.review_status) {
       where.push('review_status = ?');
       params.push(opts.review_status);
@@ -1539,19 +1374,16 @@ export const lessonRepo = {
     }
     const limit = opts?.limit ?? 500;
     params.push(limit);
-    const rows = db
-      .prepare(
-        `SELECT * FROM lessons WHERE ${where.join(' AND ')}
-         ORDER BY created_at DESC LIMIT ?`,
-      )
-      .all(...params) as LessonRow[];
+    const sql = where.length
+      ? `SELECT * FROM lessons WHERE ${where.join(' AND ')} ORDER BY created_at DESC LIMIT ?`
+      : `SELECT * FROM lessons ORDER BY created_at DESC LIMIT ?`;
+    const rows = db.prepare(sql).all(...params) as LessonRow[];
     return rows.map(rowToLesson);
   },
 
   /** ContextBuilder 用：取已审批且 audience 匹配的最近 N 条 */
   listForInjection(
     db: Database,
-    projectId: string,
     audiences: string[],
     limit = 20,
   ): Lesson[] {
@@ -1560,12 +1392,12 @@ export const lessonRepo = {
     const rows = db
       .prepare(
         `SELECT * FROM lessons
-         WHERE project_id = ? AND review_status = 'approved'
+         WHERE review_status = 'approved'
          AND audience IN (${placeholders})
          ORDER BY use_count DESC, created_at DESC
          LIMIT ?`,
       )
-      .all(projectId, ...audiences, limit) as LessonRow[];
+      .all(...audiences, limit) as LessonRow[];
     return rows.map(rowToLesson);
   },
 
@@ -1579,7 +1411,6 @@ export const lessonRepo = {
   create(
     db: Database,
     input: {
-      project_id: string;
       kind: LessonKind;
       title: string;
       body: string;
@@ -1596,11 +1427,10 @@ export const lessonRepo = {
     const reviewed = input.review_status === 'approved' || input.review_status === 'rejected';
     const result = db
       .prepare(
-        `INSERT INTO lessons (project_id, kind, title, body, audience, tags_json, source_run_id, source_message_id, confidence, review_status, recorded_by, created_at, reviewed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO lessons (kind, title, body, audience, tags_json, source_run_id, source_message_id, confidence, review_status, recorded_by, created_at, reviewed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
-        input.project_id,
         input.kind,
         input.title,
         input.body,
@@ -1911,7 +1741,7 @@ export const feedbackRepo = {
 // =============================================================================
 
 interface OnboardingRow {
-  project_id: string;
+  id: number;
   overview: string;
   tech_stack_json: string;
   conventions: string | null;
@@ -1928,7 +1758,7 @@ function rowToOnboarding(r: OnboardingRow): ProjectOnboarding {
     /* ignore */
   }
   return {
-    project_id: r.project_id,
+    project_id: '', // D-21：per-project db 内的 onboarding 都属于该 project
     overview: r.overview,
     tech_stack: stack,
     conventions: r.conventions,
@@ -1938,17 +1768,17 @@ function rowToOnboarding(r: OnboardingRow): ProjectOnboarding {
 }
 
 export const onboardingRepo = {
-  getByProject(db: Database, projectId: string): ProjectOnboarding | null {
+  /** D-21：per-project db 内 project_onboarding 是 singleton（id=1） */
+  get(db: Database): ProjectOnboarding | null {
     const row = db
-      .prepare('SELECT * FROM project_onboarding WHERE project_id = ?')
-      .get(projectId) as OnboardingRow | undefined;
+      .prepare('SELECT * FROM project_onboarding WHERE id = 1')
+      .get() as OnboardingRow | undefined;
     return row ? rowToOnboarding(row) : null;
   },
 
   upsert(
     db: Database,
     input: {
-      project_id: string;
       overview: string;
       tech_stack: string[];
       conventions?: string | null;
@@ -1956,28 +1786,22 @@ export const onboardingRepo = {
   ): ProjectOnboarding {
     const ts = now();
     db.prepare(
-      `INSERT INTO project_onboarding (project_id, overview, tech_stack_json, conventions, ready, generated_at)
-       VALUES (?, ?, ?, ?, 1, ?)
-       ON CONFLICT(project_id) DO UPDATE SET
+      `INSERT INTO project_onboarding (id, overview, tech_stack_json, conventions, ready, generated_at)
+       VALUES (1, ?, ?, ?, 1, ?)
+       ON CONFLICT(id) DO UPDATE SET
          overview = excluded.overview,
          tech_stack_json = excluded.tech_stack_json,
          conventions = excluded.conventions,
          ready = 1,
          generated_at = excluded.generated_at`,
-    ).run(
-      input.project_id,
-      input.overview,
-      JSON.stringify(input.tech_stack),
-      input.conventions ?? null,
-      ts,
-    );
-    const got = this.getByProject(db, input.project_id);
+    ).run(input.overview, JSON.stringify(input.tech_stack), input.conventions ?? null, ts);
+    const got = this.get(db);
     if (!got) throw new Error('onboarding upsert failed');
     return got;
   },
 
-  remove(db: Database, projectId: string): void {
-    db.prepare('DELETE FROM project_onboarding WHERE project_id = ?').run(projectId);
+  remove(db: Database): void {
+    db.prepare('DELETE FROM project_onboarding WHERE id = 1').run();
   },
 };
 
@@ -1988,7 +1812,6 @@ export const onboardingRepo = {
 interface SkillRow {
   id: number;
   agent_id: string;
-  project_id: string;
   skill_key: string;
   touch_count: number;
   last_touched: number;
@@ -1998,7 +1821,7 @@ function rowToSkill(r: SkillRow): AgentSkill {
   return {
     id: r.id,
     agent_id: r.agent_id,
-    project_id: r.project_id,
+    project_id: '', // D-21：per-project db 内的 skill 都属于该 project
     skill_key: r.skill_key,
     touch_count: r.touch_count,
     last_touched: r.last_touched,
@@ -2016,20 +1839,19 @@ export const skillRepo = {
     return rows.map(rowToSkill);
   },
 
-  listByProject(db: Database, projectId: string, limit = 200): AgentSkill[] {
+  list(db: Database, limit = 200): AgentSkill[] {
     const rows = db
       .prepare(
-        `SELECT * FROM agent_skills WHERE project_id = ?
+        `SELECT * FROM agent_skills
          ORDER BY touch_count DESC, last_touched DESC LIMIT ?`,
       )
-      .all(projectId, limit) as SkillRow[];
+      .all(limit) as SkillRow[];
     return rows.map(rowToSkill);
   },
 
   /** 按 keyword 推荐 agent：在 project 内匹配 skill_key 包含 keyword 的 agent，按 count 排序 */
   suggestAgents(
     db: Database,
-    projectId: string,
     keyword: string,
     limit = 5,
   ): Array<{ agent_id: string; total_count: number; matched_keys: string[] }> {
@@ -2039,11 +1861,11 @@ export const skillRepo = {
         `SELECT agent_id, SUM(touch_count) AS total_count,
                 GROUP_CONCAT(skill_key, '|') AS keys
          FROM agent_skills
-         WHERE project_id = ? AND skill_key LIKE ?
+         WHERE skill_key LIKE ?
          GROUP BY agent_id
          ORDER BY total_count DESC LIMIT ?`,
       )
-      .all(projectId, `%${keyword.trim()}%`, limit) as Array<{
+      .all(`%${keyword.trim()}%`, limit) as Array<{
       agent_id: string;
       total_count: number;
       keys: string;
@@ -2055,24 +1877,16 @@ export const skillRepo = {
     }));
   },
 
-  /**
-   * 增加 agent 在 (project, skill_key) 的 touch_count。
-   * 一次 spawn 内同 key 多次 tool_call 也只 +1（用 dedup 集合预过滤后再批量调用）。
-   */
-  bumpTouch(
-    db: Database,
-    agentId: string,
-    projectId: string,
-    skillKey: string,
-  ): void {
+  /** 增加 agent 在 skill_key 的 touch_count（per-project db 内的 skill 已是 project-scoped）*/
+  bumpTouch(db: Database, agentId: string, skillKey: string): void {
     const ts = now();
     db.prepare(
-      `INSERT INTO agent_skills (agent_id, project_id, skill_key, touch_count, last_touched)
-       VALUES (?, ?, ?, 1, ?)
-       ON CONFLICT(agent_id, project_id, skill_key) DO UPDATE SET
+      `INSERT INTO agent_skills (agent_id, skill_key, touch_count, last_touched)
+       VALUES (?, ?, 1, ?)
+       ON CONFLICT(agent_id, skill_key) DO UPDATE SET
          touch_count = touch_count + 1,
          last_touched = excluded.last_touched`,
-    ).run(agentId, projectId, skillKey, ts);
+    ).run(agentId, skillKey, ts);
   },
 };
 
@@ -2082,7 +1896,6 @@ export const skillRepo = {
 
 interface SessionRow {
   id: number;
-  project_id: string;
   goal_input: string;
   draft_yaml: string | null;
   rationale: string | null;
@@ -2097,7 +1910,7 @@ interface SessionRow {
 function rowToSession(r: SessionRow): WorkflowSession {
   return {
     id: r.id,
-    project_id: r.project_id,
+    project_id: '', // D-21：per-project db 内的 session 都属于该 project
     goal_input: r.goal_input,
     draft_yaml: r.draft_yaml,
     rationale: r.rationale,
@@ -2111,13 +1924,13 @@ function rowToSession(r: SessionRow): WorkflowSession {
 }
 
 export const workflowSessionRepo = {
-  listByProject(db: Database, projectId: string, limit = 50): WorkflowSession[] {
+  list(db: Database, limit = 50): WorkflowSession[] {
     const rows = db
       .prepare(
-        `SELECT * FROM workflow_sessions WHERE project_id = ?
+        `SELECT * FROM workflow_sessions
          ORDER BY created_at DESC LIMIT ?`,
       )
-      .all(projectId, limit) as SessionRow[];
+      .all(limit) as SessionRow[];
     return rows.map(rowToSession);
   },
 
@@ -2130,16 +1943,16 @@ export const workflowSessionRepo = {
 
   create(
     db: Database,
-    input: { project_id: string; goal_input: string; started_by: string },
+    input: { goal_input: string; started_by: string },
   ): WorkflowSession {
     const ts = now();
     const result = db
       .prepare(
         `INSERT INTO workflow_sessions
-         (project_id, goal_input, status, started_by, created_at)
-         VALUES (?, ?, 'drafting', ?, ?)`,
+         (goal_input, status, started_by, created_at)
+         VALUES (?, 'drafting', ?, ?)`,
       )
-      .run(input.project_id, input.goal_input, input.started_by, ts);
+      .run(input.goal_input, input.started_by, ts);
     const s = this.getById(db, Number(result.lastInsertRowid));
     if (!s) throw new Error('session insert failed');
     return s;

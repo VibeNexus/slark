@@ -14,7 +14,8 @@ import { useEffect, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import type { Agent, Project, ProjectOnboarding } from '@slark/shared';
 import {
-  deleteProject,
+  closeProject,
+  deleteProjectStorage,
   getProjectOnboarding,
   listAgents,
   runOnboarder,
@@ -79,8 +80,13 @@ export function ProjectSettingsPage() {
   // —— Build Team dialog ——
   const [buildTeamOpen, setBuildTeamOpen] = useState(false);
 
-  // —— Delete confirm ——
+  // —— Close confirm（Q-11：仅从 recent 移除，保留 .slark/）——
+  const [closeOpen, setCloseOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+
+  // —— Delete .slark/ confirm（Q-11：rm -rf .slark/，需输入 project name）——
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirmName, setDeleteConfirmName] = useState('');
   const [deleting, setDeleting] = useState(false);
 
   if (!projectsLoaded) {
@@ -131,11 +137,27 @@ export function ProjectSettingsPage() {
     }
   };
 
-  const handleDelete = async () => {
+  const handleClose = async () => {
+    setClosing(true);
+    try {
+      await closeProject(project.id);
+      await Promise.all([refreshProjects(), refreshChannels(), refreshAgents()]);
+      navigate('/', { replace: true });
+    } catch (e) {
+      setErrorFlash(`关闭失败：${(e as Error).message}`);
+      setClosing(false);
+      setCloseOpen(false);
+    }
+  };
+
+  const handleDeleteStorage = async () => {
+    if (deleteConfirmName !== project.name) {
+      setErrorFlash(`请输入 "${project.name}" 确认删除`);
+      return;
+    }
     setDeleting(true);
     try {
-      await deleteProject(project.id);
-      // 刷新所有 store 让 sidebar 立即剔除
+      await deleteProjectStorage(project.id, deleteConfirmName);
       await Promise.all([refreshProjects(), refreshChannels(), refreshAgents()]);
       navigate('/', { replace: true });
     } catch (e) {
@@ -326,20 +348,44 @@ export function ProjectSettingsPage() {
           )}
         </section>
 
-        {/* DANGER ZONE */}
-        <section className="bg-bg-card border-2 border-red-700 rounded-xl p-6 shadow-[6px_6px_0_0_#7f1d1d] space-y-3">
+        {/* DANGER ZONE — Q-11 双按钮 */}
+        <section className="bg-bg-card border-2 border-red-700 rounded-xl p-6 shadow-[6px_6px_0_0_#7f1d1d] space-y-4">
           <h2 className="text-lg font-bold text-red-700">Danger Zone</h2>
-          <div className="text-sm text-text-secondary">
-            删除 Project 会级联删除其 channels / agents / messages / tasks / workflow
-            runs / 沉淀 lessons + decisions。代码仓库本身不会被动。此操作不可撤销。
+
+          {/* Close project（温和）*/}
+          <div className="border-2 border-black/30 rounded p-4 bg-bg-main space-y-2">
+            <div className="font-bold text-sm">Close project</div>
+            <div className="text-[13px] text-text-secondary">
+              仅从 Sidebar 移除（保留 <code className="font-mono text-[12px]">{`{workspace}/.slark/`}</code>）。
+              下次 Open 同一路径会自动恢复全部数据。代码仓库本身不动。
+            </div>
+            <button
+              type="button"
+              onClick={() => setCloseOpen(true)}
+              className="px-3 py-1.5 border-2 border-black rounded bg-bg-card hover:bg-accent-yellow text-sm font-bold"
+            >
+              Close this project
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setDeleteOpen(true)}
-            className="px-4 py-2 border-2 border-red-700 rounded bg-red-50 text-red-700 font-bold hover:bg-red-100"
-          >
-            Delete this Project
-          </button>
+
+          {/* Delete .slark/（彻底，需输入项目名校验）*/}
+          <div className="border-2 border-red-700 rounded p-4 bg-red-50 space-y-2">
+            <div className="font-bold text-sm text-red-700">Delete .slark/ storage</div>
+            <div className="text-[13px] text-red-700/90">
+              永久删除 <code className="font-mono text-[12px]">{`{workspace}/.slark/`}</code> 整个文件夹（含 db /
+              project.json / knowledge / observations）。代码仓库本身不动。**此操作不可撤销**。
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setDeleteConfirmName('');
+                setDeleteOpen(true);
+              }}
+              className="px-3 py-1.5 border-2 border-red-700 rounded bg-white text-red-700 hover:bg-red-100 text-sm font-bold"
+            >
+              Delete .slark/ folder
+            </button>
+          </div>
         </section>
       </div>
 
@@ -356,15 +402,79 @@ export function ProjectSettingsPage() {
         }}
       />
 
+      {/* Close confirm */}
       <ConfirmDialog
-        open={deleteOpen}
-        title={`Delete project "${project.display_name ?? project.name}"?`}
-        description="This will permanently delete the project and all its channels, agents, messages, tasks, and knowledge. The code repository itself is not touched."
-        confirmLabel={deleting ? 'Deleting…' : 'Delete project'}
-        danger
-        onConfirm={() => void handleDelete()}
-        onClose={() => setDeleteOpen(false)}
+        open={closeOpen}
+        title={`Close project "${project.display_name ?? project.name}"?`}
+        description={`仅从 Sidebar recent 移除；保留 ${project.workspace_path}/.slark/。下次 Open 同一路径会自动恢复。`}
+        confirmLabel={closing ? 'Closing…' : 'Close project'}
+        onConfirm={() => void handleClose()}
+        onClose={() => setCloseOpen(false)}
       />
+
+      {/* Delete .slark/ confirm — 输入项目名校验 */}
+      {deleteOpen ? (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-bg-card border-2 border-red-700 rounded-xl shadow-[6px_6px_0_0_#7f1d1d] w-full max-w-md">
+            <header className="flex items-center justify-between px-5 py-3 border-b-2 border-red-700 bg-red-50">
+              <div className="font-bold text-base text-red-700">Delete .slark/ permanently?</div>
+              <button
+                type="button"
+                onClick={() => setDeleteOpen(false)}
+                disabled={deleting}
+                className="w-7 h-7 flex items-center justify-center border-2 border-red-700 rounded hover:bg-red-100 disabled:opacity-50"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </header>
+            <div className="p-5 space-y-3">
+              <div className="text-sm text-text-primary">
+                这将彻底删除：
+                <code className="block font-mono text-xs mt-1 px-2 py-1 bg-bg-main border border-black/20 rounded">
+                  {project.workspace_path}/.slark/
+                </code>
+              </div>
+              <div className="text-sm text-red-700">
+                包括 db / project.json / knowledge / observations。代码仓库本身不动。
+                <strong>此操作不可撤销。</strong>
+              </div>
+              <label className="block">
+                <span className="block text-xs font-bold mb-1">
+                  请输入项目名 <code className="font-mono">{project.name}</code> 确认：
+                </span>
+                <input
+                  type="text"
+                  value={deleteConfirmName}
+                  onChange={(e) => setDeleteConfirmName(e.target.value)}
+                  disabled={deleting}
+                  autoFocus
+                  className="w-full px-3 py-2 border-2 border-black rounded font-mono text-sm focus:outline-none focus:bg-accent-yellow disabled:opacity-50"
+                  placeholder={project.name}
+                />
+              </label>
+            </div>
+            <footer className="flex justify-end gap-2 px-5 py-3 border-t-2 border-red-700 bg-red-50">
+              <button
+                type="button"
+                onClick={() => setDeleteOpen(false)}
+                disabled={deleting}
+                className="px-3 py-1.5 border-2 border-black rounded bg-bg-card hover:bg-accent-yellow text-sm font-bold disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleDeleteStorage()}
+                disabled={deleting || deleteConfirmName !== project.name}
+                className="px-3 py-1.5 border-2 border-red-700 rounded bg-red-700 text-white hover:bg-red-800 text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deleting ? 'Deleting…' : 'Delete .slark/ permanently'}
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

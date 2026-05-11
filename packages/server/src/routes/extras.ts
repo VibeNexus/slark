@@ -1,14 +1,14 @@
 /**
- * 零散的全局 API：
- *   - /api/messages/search  全文搜索消息
+ * 全局视图 API（D-21 重构）
+ *   - /api/messages/search  全文搜索消息（跨所有 open project）
  *   - /api/threads          全局 thread 列表
  *   - /api/messages/:id/save / unsave
  *   - /api/saved            列出已收藏消息
  */
 
 import type { FastifyInstance } from 'fastify';
-import type { Database } from 'better-sqlite3';
 import type { ChatMessage, MessageMetadata, SenderType } from '@slark/shared';
+import { dbForResource, forEachProjectDb } from './_helpers.js';
 
 interface RawRow {
   id: string;
@@ -36,8 +36,7 @@ function rowToMessage(r: RawRow): ChatMessage {
   };
 }
 
-export async function extraRoutes(app: FastifyInstance, db: Database): Promise<void> {
-  // ---------- 消息全文搜索 ----------
+export async function extraRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/messages/search', async (req) => {
     const query = req.query as { q?: string; channel_id?: string; limit?: string };
     const q = (query.q ?? '').trim();
@@ -45,9 +44,10 @@ export async function extraRoutes(app: FastifyInstance, db: Database): Promise<v
     const limit = query.limit ? Math.min(100, Number(query.limit)) : 30;
     const like = `%${q.replace(/[%_]/g, '\\$&')}%`;
 
-    let rows: RawRow[];
     if (query.channel_id) {
-      rows = db
+      const ctx = dbForResource('channels', query.channel_id);
+      if (!ctx) return [];
+      const rows = ctx.db
         .prepare(
           `SELECT * FROM messages
            WHERE channel_id = ? AND content LIKE ? ESCAPE '\\'
@@ -55,71 +55,82 @@ export async function extraRoutes(app: FastifyInstance, db: Database): Promise<v
            LIMIT ?`,
         )
         .all(query.channel_id, like, limit) as RawRow[];
-    } else {
-      rows = db
+      return rows.map(rowToMessage);
+    }
+    return forEachProjectDb(({ db }) =>
+      (db
         .prepare(
           `SELECT * FROM messages
            WHERE content LIKE ? ESCAPE '\\'
            ORDER BY created_at DESC
            LIMIT ?`,
         )
-        .all(like, limit) as RawRow[];
-    }
-    return rows.map(rowToMessage);
+        .all(like, limit) as RawRow[]).map(rowToMessage),
+    ).slice(0, limit);
   });
 
-  // ---------- 全局 Thread 列表 ----------
   app.get('/api/threads', async (req) => {
     const query = req.query as { limit?: string };
     const limit = query.limit ? Math.min(200, Number(query.limit)) : 100;
-    // 找所有有 reply_count > 0 的根消息
-    const rows = db
-      .prepare(
-        `SELECT * FROM messages
-         WHERE parent_id IS NULL AND reply_count > 0
-         ORDER BY created_at DESC
-         LIMIT ?`,
-      )
-      .all(limit) as RawRow[];
-    return rows.map(rowToMessage);
+    return forEachProjectDb(({ db }) =>
+      (db
+        .prepare(
+          `SELECT * FROM messages
+           WHERE parent_id IS NULL AND reply_count > 0
+           ORDER BY created_at DESC
+           LIMIT ?`,
+        )
+        .all(limit) as RawRow[]).map(rowToMessage),
+    ).slice(0, limit);
   });
 
-  // ---------- Save / Unsave 消息 ----------
   app.post('/api/messages/:id/save', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const exists = db.prepare('SELECT id FROM messages WHERE id = ?').get(id);
+    const ctx = dbForResource('messages', id);
+    if (!ctx) {
+      reply.code(404);
+      return { error: 'message not found' };
+    }
+    const exists = ctx.db.prepare('SELECT id FROM messages WHERE id = ?').get(id);
     if (!exists) {
       reply.code(404);
       return { error: 'message not found' };
     }
-    db.prepare(
-      'INSERT OR REPLACE INTO saved_messages (message_id, saved_at) VALUES (?, ?)',
-    ).run(id, Date.now());
+    ctx.db
+      .prepare('INSERT OR REPLACE INTO saved_messages (message_id, saved_at) VALUES (?, ?)')
+      .run(id, Date.now());
     return { ok: true };
   });
 
   app.delete('/api/messages/:id/save', async (req, reply) => {
     const { id } = req.params as { id: string };
-    db.prepare('DELETE FROM saved_messages WHERE message_id = ?').run(id);
+    const ctx = dbForResource('messages', id);
+    if (!ctx) {
+      reply.code(404);
+      return { error: 'message not found' };
+    }
+    ctx.db.prepare('DELETE FROM saved_messages WHERE message_id = ?').run(id);
     reply.code(204);
   });
 
   app.get('/api/messages/:id/saved', async (req) => {
     const { id } = req.params as { id: string };
-    const row = db.prepare('SELECT 1 FROM saved_messages WHERE message_id = ?').get(id);
+    const ctx = dbForResource('messages', id);
+    if (!ctx) return { saved: false };
+    const row = ctx.db.prepare('SELECT 1 FROM saved_messages WHERE message_id = ?').get(id);
     return { saved: !!row };
   });
 
-  // ---------- 收藏列表 ----------
   app.get('/api/saved', async () => {
-    const rows = db
-      .prepare(
-        `SELECT m.* FROM saved_messages s
-         JOIN messages m ON m.id = s.message_id
-         ORDER BY s.saved_at DESC
-         LIMIT 200`,
-      )
-      .all() as RawRow[];
-    return rows.map(rowToMessage);
+    return forEachProjectDb(({ db }) =>
+      (db
+        .prepare(
+          `SELECT m.* FROM saved_messages s
+           JOIN messages m ON m.id = s.message_id
+           ORDER BY s.saved_at DESC
+           LIMIT 200`,
+        )
+        .all() as RawRow[]).map(rowToMessage),
+    ).slice(0, 200);
   });
 }

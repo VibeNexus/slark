@@ -1,45 +1,41 @@
 /**
- * Workflow Sessions REST API（Sprint 7 / Facilitator）
- *
- * Endpoints:
- *   GET  /api/projects/:id/workflow-sessions               列出该 project 的所有 session
- *   POST /api/projects/:id/workflow-sessions               启动新 session（异步跑 Facilitator）
- *   GET  /api/workflow-sessions/:id                        详情
- *   POST /api/workflow-sessions/:id/approve                Approve：把 draft_yaml 写到 workflows 表
- *     body: { name?, trigger_command? } 可 override；默认从 YAML 顶部解析
- *   POST /api/workflow-sessions/:id/reject                 标 rejected
- *   POST /api/workflow-sessions/:id/archive                标 archived
+ * Workflow Sessions REST API（D-21 重构）
  */
 
 import type { FastifyInstance } from 'fastify';
 import type { Database } from 'better-sqlite3';
+import type { Project } from '@slark/shared';
 import { LOCAL_USER_ID } from '@slark/shared';
 import {
   agentRepo,
-  projectRepo,
   workflowRepo,
   workflowSessionRepo,
 } from '../db/repos.js';
 import { runFacilitator } from '../system-agents/facilitator.js';
 import { parseWorkflowYaml, WorkflowYamlError } from '../workflows/yaml-parser.js';
 import { deriveResponsibilitiesForWorkflow } from '../workflows/derive-responsibilities.js';
+import { dbForProjectId } from './_helpers.js';
+import { projectsService } from '../config/projects-service.js';
 
-export async function workflowSessionRoutes(
-  app: FastifyInstance,
-  db: Database,
-): Promise<void> {
+export async function workflowSessionRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/projects/:id/workflow-sessions', async (req, reply) => {
     const { id } = req.params as { id: string };
-    if (!projectRepo.getById(db, id)) {
+    const ctx = dbForProjectId(id);
+    if (!ctx) {
       reply.code(404);
       return { error: 'project not found' };
     }
-    return workflowSessionRepo.listByProject(db, id);
+    return workflowSessionRepo.list(ctx.db).map((s) => ({ ...s, project_id: ctx.projectId }));
   });
 
   app.post('/api/projects/:id/workflow-sessions', async (req, reply) => {
     const { id: projectId } = req.params as { id: string };
-    const project = projectRepo.getById(db, projectId);
+    const ctx = dbForProjectId(projectId);
+    if (!ctx) {
+      reply.code(404);
+      return { error: 'project not found' };
+    }
+    const project = projectsService.getById(projectId);
     if (!project) {
       reply.code(404);
       return { error: 'project not found' };
@@ -50,35 +46,39 @@ export async function workflowSessionRoutes(
       return { error: 'goal_input is required' };
     }
 
-    const session = workflowSessionRepo.create(db, {
-      project_id: projectId,
+    const session = workflowSessionRepo.create(ctx.db, {
       goal_input: body.goal_input.trim(),
       started_by: LOCAL_USER_ID,
     });
 
-    // 异步跑 Facilitator
-    void facilitateInBackground(db, session.id, {
+    void facilitateInBackground(ctx.db, session.id, project, {
       info: (m) => req.log.info(m),
       warn: (m) => req.log.warn(m),
     }).catch((e: Error) => req.log.warn(`[facilitator] ${e.message}`));
 
     reply.code(201);
-    return session;
+    return { ...session, project_id: ctx.projectId };
   });
 
   app.get('/api/workflow-sessions/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const s = workflowSessionRepo.getById(db, Number(id));
-    if (!s) {
+    const ctx = await findCtxForRow('workflow_sessions', Number(id));
+    if (!ctx) {
       reply.code(404);
       return { error: 'session not found' };
     }
-    return s;
+    const s = workflowSessionRepo.getById(ctx.db, Number(id));
+    return s ? { ...s, project_id: ctx.projectId } : null;
   });
 
   app.post('/api/workflow-sessions/:id/approve', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const session = workflowSessionRepo.getById(db, Number(id));
+    const ctx = await findCtxForRow('workflow_sessions', Number(id));
+    if (!ctx) {
+      reply.code(404);
+      return { error: 'session not found' };
+    }
+    const session = workflowSessionRepo.getById(ctx.db, Number(id));
     if (!session) {
       reply.code(404);
       return { error: 'session not found' };
@@ -100,12 +100,10 @@ export async function workflowSessionRoutes(
       reply.code(400);
       return { error: `draft YAML invalid: ${msg}` };
     }
-
     const trigger = body.trigger_command ?? definition.trigger.command;
     const name = body.name ?? definition.name;
 
-    // 检查 trigger 唯一
-    const conflict = workflowRepo.getByTrigger(db, session.project_id, trigger);
+    const conflict = workflowRepo.getByTrigger(ctx.db, trigger);
     if (conflict) {
       reply.code(409);
       return {
@@ -113,8 +111,7 @@ export async function workflowSessionRoutes(
       };
     }
 
-    const wf = workflowRepo.create(db, {
-      project_id: session.project_id,
+    const wf = workflowRepo.create(ctx.db, {
       name,
       description: definition.description ?? null,
       trigger_command: trigger,
@@ -122,22 +119,30 @@ export async function workflowSessionRoutes(
       source: 'user',
     });
     try {
-      deriveResponsibilitiesForWorkflow(db, wf.id);
+      deriveResponsibilitiesForWorkflow(ctx.db, wf.id);
     } catch (e) {
       req.log.warn(`[workflow-session] derive failed: ${(e as Error).message}`);
     }
 
-    const updated = workflowSessionRepo.update(db, session.id, {
+    const updated = workflowSessionRepo.update(ctx.db, session.id, {
       status: 'approved',
       workflow_id: wf.id,
       ended: true,
     });
-    return { session: updated, workflow: wf };
+    return {
+      session: updated ? { ...updated, project_id: ctx.projectId } : null,
+      workflow: { ...wf, project_id: ctx.projectId },
+    };
   });
 
   app.post('/api/workflow-sessions/:id/reject', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const session = workflowSessionRepo.getById(db, Number(id));
+    const ctx = await findCtxForRow('workflow_sessions', Number(id));
+    if (!ctx) {
+      reply.code(404);
+      return { error: 'session not found' };
+    }
+    const session = workflowSessionRepo.getById(ctx.db, Number(id));
     if (!session) {
       reply.code(404);
       return { error: 'session not found' };
@@ -146,41 +151,42 @@ export async function workflowSessionRoutes(
       reply.code(409);
       return { error: `session is ${session.status}; cannot reject` };
     }
-    return workflowSessionRepo.update(db, session.id, { status: 'rejected', ended: true });
+    const updated = workflowSessionRepo.update(ctx.db, session.id, {
+      status: 'rejected',
+      ended: true,
+    });
+    return updated ? { ...updated, project_id: ctx.projectId } : null;
   });
 
   app.post('/api/workflow-sessions/:id/archive', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const session = workflowSessionRepo.getById(db, Number(id));
+    const ctx = await findCtxForRow('workflow_sessions', Number(id));
+    if (!ctx) {
+      reply.code(404);
+      return { error: 'session not found' };
+    }
+    const session = workflowSessionRepo.getById(ctx.db, Number(id));
     if (!session) {
       reply.code(404);
       return { error: 'session not found' };
     }
-    return workflowSessionRepo.update(db, session.id, { status: 'archived', ended: true });
+    const updated = workflowSessionRepo.update(ctx.db, session.id, {
+      status: 'archived',
+      ended: true,
+    });
+    return updated ? { ...updated, project_id: ctx.projectId } : null;
   });
 }
-
-// =============================================================================
-// 后台跑 Facilitator
-// =============================================================================
 
 async function facilitateInBackground(
   db: Database,
   sessionId: number,
+  project: Project,
   logger: { info: (m: string) => void; warn: (m: string) => void },
 ): Promise<void> {
   const session = workflowSessionRepo.getById(db, sessionId);
   if (!session || session.status !== 'drafting') return;
-  const project = projectRepo.getById(db, session.project_id);
-  if (!project) {
-    workflowSessionRepo.update(db, sessionId, {
-      status: 'failed',
-      fallback_reason: 'project not found',
-      ended: true,
-    });
-    return;
-  }
-  const agents = agentRepo.listByProject(db, session.project_id);
+  const agents = agentRepo.list(db);
   const out = await runFacilitator(
     { project, agents, goal_input: session.goal_input },
     logger,
@@ -198,4 +204,23 @@ async function facilitateInBackground(
     draft_yaml: out.yaml ?? '',
     rationale: out.rationale ?? null,
   });
+}
+
+/** 跨 db 反查 row 所在 project（用法同 intelligence.ts findCtxForRow）*/
+async function findCtxForRow(table: string, id: number) {
+  const { listOpenDbs } = await import('../db/index.js');
+  for (const open of listOpenDbs()) {
+    try {
+      const row = open.db.prepare(`SELECT 1 FROM ${table} WHERE id = ?`).get(id);
+      if (row) {
+        const project = projectsService.getByPath(open.workspacePath);
+        if (project) {
+          return { db: open.db, workspacePath: open.workspacePath, projectId: project.id };
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
 }

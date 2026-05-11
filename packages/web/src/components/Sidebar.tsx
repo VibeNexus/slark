@@ -9,9 +9,12 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { NavLink, useSearchParams, useNavigate } from 'react-router-dom';
 import type { Agent, Channel, Project } from '@slark/shared';
 import { cn } from '../lib/cn';
+import { closeProject } from '../lib/api';
+import { useProjectsStore } from '../stores/projects';
 import {
   projectAgentProfilePath,
   projectChannelPath,
@@ -413,6 +416,7 @@ function ProjectSwitcher({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  const refreshProjects = useProjectsStore((s) => s.refresh);
 
   useEffect(() => {
     if (!open) return;
@@ -460,6 +464,18 @@ function ProjectSwitcher({
                   setOpen(false);
                   navigate(projectSettingsPath(p.name));
                 }}
+                onClose={async () => {
+                  setOpen(false);
+                  try {
+                    await closeProject(p.id);
+                    await refreshProjects();
+                    if (currentProject?.id === p.id) {
+                      navigate('/', { replace: true });
+                    }
+                  } catch (err) {
+                    console.error('[sidebar] close project failed', err);
+                  }
+                }}
               />
             ))}
           </div>
@@ -486,26 +502,49 @@ function ProjectRow({
   isCurrent,
   onSelect,
   onSettings,
+  onClose,
 }: {
   project: Project;
   isCurrent: boolean;
   onSelect: () => void;
   onSettings: () => void;
+  onClose: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
+  // 关菜单：ESC / 点击别处
   useEffect(() => {
     if (!menuOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setMenuOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
     };
-    window.addEventListener('mousedown', onDoc);
-    return () => window.removeEventListener('mousedown', onDoc);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, [menuOpen]);
 
+  const handleOpenMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (menuOpen) {
+      setMenuOpen(false);
+      return;
+    }
+    // 用 fixed + portal 渲染：精确锚定 ⋯ 按钮，绕过父级 overflow:auto 的裁剪
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (rect) {
+      const MENU_WIDTH = 160;
+      setMenuPos({
+        top: rect.bottom + 4,
+        // 右对齐按钮右边缘；避免菜单超出 viewport 右边
+        left: Math.max(8, rect.right - MENU_WIDTH),
+      });
+    }
+    setMenuOpen(true);
+  };
+
   return (
-    <div ref={ref} className="relative">
+    <>
       <div
         className={cn(
           'group flex items-center gap-1 hover:bg-accent-yellow',
@@ -526,11 +565,9 @@ function ProjectRow({
           {isCurrent && <span className="flex-shrink-0">✓</span>}
         </button>
         <button
+          ref={triggerRef}
           type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            setMenuOpen((v) => !v);
-          }}
+          onClick={handleOpenMenu}
           className="px-2 py-2 hover:bg-bg-card opacity-60 hover:opacity-100"
           aria-label={`More actions for ${project.name}`}
           title="More actions"
@@ -538,21 +575,48 @@ function ProjectRow({
           ⋯
         </button>
       </div>
-      {menuOpen && (
-        <div className="absolute right-1 top-full mt-1 z-50 min-w-[160px] bg-bg-card border-2 border-black rounded shadow-[3px_3px_0_0_#000]">
-          <button
-            type="button"
-            onClick={() => {
-              setMenuOpen(false);
-              onSettings();
-            }}
-            className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent-yellow font-medium"
-          >
-            ⚙ Settings
-          </button>
-        </div>
-      )}
-    </div>
+      {menuOpen && menuPos &&
+        createPortal(
+          <>
+            {/* 透明遮罩：点击空白处关菜单 */}
+            <div
+              className="fixed inset-0 z-[60]"
+              onClick={() => setMenuOpen(false)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setMenuOpen(false);
+              }}
+            />
+            <div
+              className="fixed z-[70] min-w-[160px] bg-bg-card border-2 border-black rounded shadow-[3px_3px_0_0_#000]"
+              style={{ top: menuPos.top, left: menuPos.left }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onSettings();
+                }}
+                className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent-yellow font-medium"
+              >
+                ⚙ Settings
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onClose();
+                }}
+                className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent-yellow font-medium border-t-2 border-black"
+                title="Remove from sidebar (.slark/ folder kept on disk)"
+              >
+                ✕ Close
+              </button>
+            </div>
+          </>,
+          document.body,
+        )}
+    </>
   );
 }
 

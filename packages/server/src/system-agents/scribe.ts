@@ -35,7 +35,7 @@ import { decisionRepo, lessonRepo } from '../db/repos.js';
 import type { Database } from 'better-sqlite3';
 
 export interface ScribeInput {
-  project_id: string;
+  // D-21：project_id 不再需要 — db 已经是 per-project handle
   /** 触发场景，影响 prompt 提示语 */
   trigger:
     | { kind: 'workflow_run'; workflow_name: string; initial_input?: string; run_id: number }
@@ -116,7 +116,6 @@ export async function runScribe(input: ScribeInput): Promise<ScribeOutput> {
  */
 export function persistScribeOutput(
   db: Database,
-  projectId: string,
   output: ScribeOutput,
   context: { source_run_id: number | null },
 ): { decisions: Decision[]; lessons: Lesson[] } {
@@ -125,7 +124,6 @@ export function persistScribeOutput(
 
   for (const d of output.decisions) {
     const created = decisionRepo.create(db, {
-      project_id: projectId,
       title: d.title,
       body: d.body,
       audience: d.audience,
@@ -140,7 +138,6 @@ export function persistScribeOutput(
 
   for (const l of output.lessons) {
     const created = lessonRepo.create(db, {
-      project_id: projectId,
       kind: l.kind,
       title: l.title,
       body: l.body,

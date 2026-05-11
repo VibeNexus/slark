@@ -41,20 +41,29 @@ const consoleLog: EvaluatorLogger = {
 
 let evaluatorTimer: NodeJS.Timeout | null = null;
 
-export function startEvaluatorScheduler(
-  db: Database,
-  logger: EvaluatorLogger = consoleLog,
-): void {
+/**
+ * D-21：scheduler 不再持有单一 db handle；tick 时遍历所有 open project db 各跑一轮。
+ */
+export function startEvaluatorScheduler(logger: EvaluatorLogger = consoleLog): void {
   if (evaluatorTimer) return;
   const tick = async () => {
     try {
-      await runEvaluatorOnce(db, logger);
-      await runCoachOnce(db, logger);
+      // 延迟导入避免循环依赖
+      const { listOpenDbs } = await import('../db/index.js');
+      for (const open of listOpenDbs()) {
+        try {
+          await runEvaluatorOnce(open.db, logger);
+          await runCoachOnce(open.db, logger);
+        } catch (e) {
+          logger.error(
+            `[evaluator] project ${open.workspacePath} tick failed: ${(e as Error).message}`,
+          );
+        }
+      }
     } catch (e) {
       logger.error(`[evaluator] tick failed: ${(e as Error).message}`);
     }
   };
-  // 首次延迟 60s 等服务稳定，再启动循环
   setTimeout(() => {
     void tick();
     evaluatorTimer = setInterval(() => void tick(), EVALUATOR_WINDOW_MS);

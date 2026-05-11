@@ -27,6 +27,11 @@
 | **D-18** | §D-7 多 Project 并发隔离六层契约 | v1.0 新增锚点 |
 | **D-19** | §D-3 Team Architect 兜底三件套 | v1.0 新增锚点 |
 | **D-20** | §5.3 四个运营闭环 | v1.0 新增锚点 |
+| **D-21** | "Cursor 风格 open folder" 心智 | v1.1 新增（Per-Project Storage 重构）|
+| **D-22** | §D-7 多项目隔离的物理实现 | D-21 衍生 |
+| **D-23** | §D-3 / §D-7 协作友好的 git 入仓建议 | D-21 衍生 |
+| **D-24** | §11 Schema 总清单 | D-21 衍生 |
+| **D-25** | §D-2 Project lifecycle Q-11 决议 | D-21 衍生 |
 
 **冲突规则**：本文档与 product-brief 冲突时，**以 product-brief 为准**。本文档只负责承载"实现细节"，不决定产品定位。
 
@@ -756,6 +761,128 @@ CREATE TABLE agent_skills (
 
 ---
 
+## D-21: Per-Project Storage 架构
+
+对齐：`docs/per-project-storage-design.md` v0.3（Q-10 ~ Q-14 决议）
+
+### 决策
+
+项目级数据从**中央 `~/.slark/slark.db`** 迁移到 **每个 workspace 的 `<path>/.slark/`** 目录：
+
+```
+<workspace>/
+└── .slark/
+    ├── project.json        ← 元数据（id / name / display_name / goal / team_rules / color / created_at）
+    ├── slark.db            ← 该 project 的全部业务数据（channels / agents / messages / tasks / workflows / decisions / lessons / observations / feedback / onboarding / skills / sessions）
+    ├── slark.db-wal
+    ├── slark.db-shm
+    ├── knowledge/
+    │   ├── decisions.jsonl  ← 仅 review_status='approved' 同步到 jsonl（Q-13），便于入 git
+    │   └── lessons.jsonl
+    ├── observations/        ← reserved；evaluator 过程数据，默认 ignore
+    ├── .gitignore           ← 默认配置 slark.db* / observations/ 不入 git
+    └── README.md            ← 自动生成的目录说明
+```
+
+中央 `~/.slark/projects.json` 仅维护 recent list（id / path / lastOpened），**不存任何业务数据**。
+
+### 配套机制
+
+- **DB Handle Pool**（`db/index.ts`）：LRU max=20，30min idle close；`openProjectDb(workspacePath)` 懒加载。
+- **资源反查**：`findDbByResource('channels'|'agents'|...)` 跨 open db 反查，避免改 URL 形态。
+- **Warm-up**：server 启动期 openProjectDb 全部 recent project，让 `/api/threads`、`/api/saved` 等全局视图能聚合。
+- **全局事件**（D-21 + WS）：`hub.broadcastGlobal({ type: 'project_list_changed' | 'knowledge_updated' })` 推送到所有 socket，前端 sidebar / inbox 自动 refresh。
+
+### 兼容策略
+
+**开发阶段不向前兼容**（Q-12）：旧 `~/.slark/slark.db` 启动期检测到时仅 warn，不迁移；用户手动 `mv` 即可释放磁盘。
+
+---
+
+## D-22: 多项目隔离的物理边界
+
+对齐：`product-brief.md §D-7 多项目隔离六层契约` + D-21
+
+### 决策
+
+D-21 把项目隔离从**逻辑层（WHERE project_id = ?）** 升级到 **物理层（独立 SQLite 文件）**：
+
+| 隔离维度 | v1.0（中央 db）| v1.1+（per-project db）|
+|---------|---------------|---------------------|
+| Channel ID 命名空间 | 全局唯一（nanoid） | per-db 唯一即可 |
+| Agent name 命名空间 | per-project unique（应用层校验） | per-db 唯一（schema 层 UNIQUE）|
+| 数据库文件 | 1 份共享 | N 份独立 |
+| 备份/恢复粒度 | 整个 Slark | 单个 project（拷贝目录即可） |
+| 并发写入 | 单 db lock 串行化 | 各 project 独立 lock |
+| 删除项目副作用 | DELETE CASCADE 大量行 | rm -rf .slark/，无副作用 |
+
+**资源反查约束**：因为 channel_id / agent_id 不再全局唯一，server 启动期必须 warm-up 所有 recent project；运行时未 warm-up 的资源（LRU 淘汰后未访问）通过下次访问 lazy 重新打开恢复。
+
+---
+
+## D-23: 团队共享 / git 入仓建议
+
+对齐：`product-brief.md §D-3 协作场景`
+
+### 决策
+
+`<workspace>/.slark/` 自动写入 `.gitignore` + `README.md`，明确推荐入仓边界：
+
+| 文件 | git 策略 | 理由 |
+|------|---------|------|
+| `project.json` | **commit** | 团队对项目元数据（goal / team_rules）的共识 |
+| `knowledge/*.jsonl` | **commit** | reviewed 决策 + 经验，跟代码 review 一起走 |
+| `slark.db*` | **ignore** | 个人对话历史；冲突合并不可行 |
+| `observations/` | **ignore** | 实时 evaluator 噪声 |
+| `README.md` | optional | 不强制；用户可自由扩展 |
+
+### Knowledge JSONL 同步策略（v0 简化）
+
+仅在 `review_status='approved'` 状态变化时整体重写 `decisions.jsonl` / `lessons.jsonl`（非增量 append）。代价是每次 approve 重写 100 行级别的小文件，IO 可忽略。**不双向同步**：用户手动改 jsonl 不会回写 db（Q-14）。
+
+---
+
+## D-24: per-project schema 简化
+
+对齐：D-21 / D-22
+
+### 决策
+
+- **删除** `projects` 表（元数据迁移到 `project.json`）
+- 所有 v1.0 的 `project_id` 列、FK、相关 INDEX 全部移除
+- `agents.name UNIQUE` 自然变成 per-project 唯一（无需应用层校验）
+- `workflows.trigger_command UNIQUE` 自然变成 per-project 唯一
+- `project_onboarding` 改为 singleton（`id INTEGER PRIMARY KEY CHECK (id = 1)`）
+- `agent_skills.UNIQUE(agent_id, skill_key)` 替换原 `UNIQUE(agent_id, project_id, skill_key)`
+
+返回给前端的 `Project` / `Channel` / `Agent` 等 DTO 仍含 `project_id` 字段，由 server 端从 db handle 反查注入，前端不感知存储变化。
+
+---
+
+## D-25: Project Lifecycle — Open / Close / Delete 三态
+
+对齐：Q-11 决议（`docs/per-project-storage-design.md`）
+
+### 决策
+
+| 操作 | 触发 | 副作用 | UI 入口 |
+|------|------|--------|---------|
+| **Open** | 用户选 workspace 路径 | 检测 `<path>/.slark/`：存在则 reopen（读 project.json + open db），不存在则新建（写 project.json + 初始 db + .gitignore + README.md + #general channel） | Sidebar 顶部 "📂 Open project folder" / WelcomePage / OpenProjectDialog |
+| **Close** | 用户从 Sidebar / Settings 选 Close | 仅从 `~/.slark/projects.json` 移除 + 关闭 db handle；**保留磁盘文件** | Sidebar Switcher ⋯ → Close / Settings Danger Zone "Close project" |
+| **Delete .slark/** | 用户从 Settings 选 Delete + 输入项目名 slug 校验 | server 端 `confirm_name === project.name` 校验通过后 `rm -rf <path>/.slark/` + 从 recent 移除；代码仓库本身不动；不可撤销 | Settings Danger Zone "Delete .slark/ folder"（独立模态 + 文本输入校验）|
+
+### API 形态
+
+```
+POST /api/projects/open                  → { project, is_new }
+POST /api/projects/:id/close             → 204
+POST /api/projects/:id/delete-storage    → body: { confirm_name }，匹配才执行；否则 400
+```
+
+旧 `POST /api/projects` 已废除；旧 `DELETE /api/projects/:id` 由 close + delete-storage 双按钮替代。
+
+---
+
 ## 版本历史
 
 | 版本 | 日期 | 变更 |
@@ -763,4 +890,5 @@ CREATE TABLE agent_skills (
 | v0 | ~2026-04-22 | 初版 D-1 ~ D-12 + O-1 ~ O-4，支撑 v0 MVP |
 | v1.0.1 | 2026-04-23 | 对齐 `product-brief.md v1.0.1`：修订 D-1 (状态 per-channel)、D-3 (activity 加 channel_id)、D-6 (链式 per-thread)、D-8 (workspace 废除)、D-9 (seed 不预置)；新增 D-13 ~ D-20 (Project / Goal / System Agents / Workflow / Responsibilities / 隔离契约 / 兜底三件套 / 4 Loop) |
 | **v1.1** | 2026-04-30 | **文档体系简化**：在头部声明"实施进度以 `project-status.md` 为准"；D-1 / D-8 加"⚠ 当前过渡状态"标注（指向 TD-N）；不再在本文档维护落地进度 |
+| **v1.2** | 2026-05-08 | **Per-Project Storage 重构落地**：新增 D-21 ~ D-25（开发阶段不向前兼容；rm 旧 db 即可）|
 

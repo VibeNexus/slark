@@ -1,137 +1,178 @@
 /**
- * SQLite 数据库初始化与单例访问
+ * Per-Project SQLite Handle Pool
+ *
+ * 重构（D-21）：每个 Project 一个独立 SQLite db，文件位于 `<workspace>/.slark/slark.db`。
+ * 不再有"中央 ~/.slark/slark.db"。db 句柄通过 LRU 池管理，按 workspace_path 缓存。
+ *
+ * 关键 API：
+ *   - openProjectDb(workspacePath)  — 打开 / 创建 db；首次 mkdir + apply schema
+ *   - closeProjectDb(workspacePath) — 关闭 db 句柄
+ *   - listOpenDbs()                  — 全局视图聚合用：列举所有当前打开的 (path, db)
+ *
+ * 句柄池：
+ *   - LRU max=20；超过则淘汰最久未使用的 db.close()
+ *   - 30min idle close（每分钟检查）
+ *   - 主动 close 后下次 openProjectDb 重新打开（lazy）
  *
  * Schema 版本：
- *   1 - v0 MVP 初始 schema（channels / agents / messages / tasks / agent_activity / meta 等）
- *   2 - v1.0 Sprint 1 CP1/CP3：新增 projects / agent_runs 表、agent_activity 加 channel_id 列
- *   3 - v1.0 Sprint 2 CP8.3：删除 agents.status 字段（状态从 agent_runs 派生，对齐 D-1）
- *   4 - v1.0 Sprint 2 CP1：新增 workflows / workflow_runs 表（D-16）
- *   5 - v1.0 Sprint 3 CP1：新增 responsibilities 表（D-17）
- *   6 - v1.0 Sprint 4 CP1：新增 decisions / lessons 表（D-20 Knowledge）
- *   7 - v1.0 Sprint 5 CP1：新增 agent_observations / agent_feedback 表（D-20 Evolution Loop）
- *   8 - v1.0 Sprint 6 CP1：新增 project_onboarding / agent_skills 表（D-20 Onboarding + Reuse）
- *   9 - v1.0 Sprint 7 CP1：新增 workflow_sessions 表（D-15 Facilitator）
- *  10 - Sprint 4-ext Phase A：agents 表加 thinking / context 列；reasoning 'xhigh' → 'extra-high'
+ *   - per-project schema 内部维护 schema_version，写在 meta 表
+ *   - 当前版本 1（per-project storage 起步）
  */
 
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import type { Database as DB } from 'better-sqlite3';
-import { config, dbPath } from '../config.js';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { dirname, resolve as pathResolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { projectSlarkDir } from '../config/project-meta.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// dev（tsx）下直接在 src 目录；build 后 schema.sql 会复制到 dist/db/
 const SCHEMA_CANDIDATES = [
-  resolve(__dirname, 'schema.sql'),
-  resolve(__dirname, '../../src/db/schema.sql'),
+  pathResolve(__dirname, 'schema.sql'),
+  pathResolve(__dirname, '../../src/db/schema.sql'),
 ];
 const SCHEMA_PATH = SCHEMA_CANDIDATES.find((p) => existsSync(p));
 
-const CURRENT_SCHEMA_VERSION = '10';
+const PER_PROJECT_SCHEMA_VERSION = '1';
+const POOL_MAX = 20;
+const IDLE_CLOSE_MS = 30 * 60 * 1000; // 30 min
 
-let _db: DB | null = null;
+interface PoolEntry {
+  db: DB;
+  workspacePath: string;
+  lastUsed: number;
+}
 
-export function getDb(): DB {
-  if (_db) return _db;
+const pool = new Map<string, PoolEntry>();
 
-  mkdirSync(config.slarkHome, { recursive: true });
+function normalizePath(workspacePath: string): string {
+  return pathResolve(workspacePath);
+}
 
-  const db = new Database(dbPath());
+/** 打开 / 创建 per-project db。首次会 mkdir <ws>/.slark/ + apply schema。*/
+export function openProjectDb(workspacePath: string): DB {
+  const norm = normalizePath(workspacePath);
+  const existing = pool.get(norm);
+  if (existing) {
+    existing.lastUsed = Date.now();
+    return existing.db;
+  }
+
+  // 首次打开：保证 .slark/ 目录存在
+  const slarkDir = projectSlarkDir(norm);
+  mkdirSync(slarkDir, { recursive: true });
+  const dbFile = pathResolve(slarkDir, 'slark.db');
+
+  const db = new Database(dbFile);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
 
   if (!SCHEMA_PATH) {
-    throw new Error(
-      `schema.sql not found. Checked: ${SCHEMA_CANDIDATES.join(', ')}`,
-    );
+    throw new Error(`schema.sql not found. Checked: ${SCHEMA_CANDIDATES.join(', ')}`);
   }
-  const schemaSql = readFileSync(SCHEMA_PATH, 'utf8');
+  const schemaSql = readFileSync(SCHEMA_PATH, 'utf-8');
   db.exec(schemaSql);
 
-  // 幂等迁移：对 v0 db（已有 agent_activity 表但缺 channel_id 列）补齐
-  migrate(db);
-
-  // 检查 / 记录 schema 版本
-  const stmt = db.prepare<[string], { value: string }>('SELECT value FROM meta WHERE key = ?');
+  // 写入 / 校验 schema_version
+  const stmt = db.prepare<[string], { value: string }>(
+    'SELECT value FROM meta WHERE key = ?',
+  );
   const row = stmt.get('schema_version');
   if (!row) {
     db.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(
       'schema_version',
-      CURRENT_SCHEMA_VERSION,
+      PER_PROJECT_SCHEMA_VERSION,
     );
-  } else if (row.value !== CURRENT_SCHEMA_VERSION) {
+  } else if (row.value !== PER_PROJECT_SCHEMA_VERSION) {
     db.prepare('UPDATE meta SET value = ? WHERE key = ?').run(
-      CURRENT_SCHEMA_VERSION,
+      PER_PROJECT_SCHEMA_VERSION,
       'schema_version',
     );
   }
 
-  _db = db;
+  pool.set(norm, { db, workspacePath: norm, lastUsed: Date.now() });
+  evictIfNeeded();
   return db;
 }
 
-export function closeDb(): void {
-  if (_db) {
-    _db.close();
-    _db = null;
+export function closeProjectDb(workspacePath: string): void {
+  const norm = normalizePath(workspacePath);
+  const entry = pool.get(norm);
+  if (!entry) return;
+  try {
+    entry.db.close();
+  } catch {
+    /* ignore */
   }
+  pool.delete(norm);
 }
 
-// =============================================================================
-// 迁移：幂等检查每个列
-// =============================================================================
-function migrate(db: DB): void {
-  ensureColumn(db, 'agent_activity', 'channel_id', 'TEXT');
-  ensureColumn(db, 'channels', 'project_id', 'TEXT');
-  ensureColumn(db, 'agents', 'project_id', 'TEXT');
-  // CP8.3：从旧 db（v0 / v1.0.0~v1.0.1）删除 agents.status 字段
-  // 状态改由 agent_runs 表派生，详见 docs/technical-decisions.md D-1。
-  dropColumnIfExists(db, 'agents', 'status');
-
-  // Sprint 4-ext Phase A：补 thinking / context 列（schema v10）
-  ensureColumn(db, 'agents', 'thinking', 'INTEGER');
-  ensureColumn(db, 'agents', 'context', 'TEXT');
-
-  // Sprint 4-ext：把 cursor-agent CLI 时代的 model 别名规范化到 SDK 兼容 ID。
-  // SDK 严格只接受 Cursor.models.list() 返回的 ID，老数据会让 SDK 模式 spawn 全挂；
-  // SDK adapter 内部已有 alias fallback 兜底，但 db 里留着旧字符串影响 UI 显示，所以一并改。
-  normalizeAgentModelAliases(db);
-  // Sprint 4-ext Phase B：reasoning 'xhigh' → 'extra-high'（与 SDK / IDE 命名空间对齐）
-  normalizeReasoningAliases(db);
+/** 全局视图聚合用：列出所有当前打开的 (path, db)。不会触发懒加载。*/
+export function listOpenDbs(): Array<{ workspacePath: string; db: DB }> {
+  return Array.from(pool.values()).map((e) => ({
+    workspacePath: e.workspacePath,
+    db: e.db,
+  }));
 }
 
-function normalizeAgentModelAliases(db: DB): void {
-  const aliases: Array<[string, string]> = [
-    ['composer-2-fast', 'composer-2'],
-    ['composer-2-balanced', 'composer-2'],
-    ['auto', 'default'],
-  ];
-  for (const [from, to] of aliases) {
-    db.prepare('UPDATE agents SET model = ? WHERE model = ?').run(to, from);
+/**
+ * 资源反查：给定 (table, id) 在所有已打开的 db 中找哪个 db 拥有该行。
+ * 用于 routes/messaging 等只拿到 channel_id / agent_id 时反向 resolve project db。
+ * 性能：N 个 open db × SELECT 1 by index → < 1ms / project。
+ *
+ * 限制：必须 db 已打开。建议 server 启动期 warm-up 所有 recent projects。
+ */
+export function findDbByResource(
+  table: 'channels' | 'agents' | 'workflows' | 'messages' | 'tasks' | 'workflow_runs' | 'agent_observations' | 'agent_feedback',
+  id: string | number,
+): { workspacePath: string; db: DB } | null {
+  for (const entry of pool.values()) {
+    try {
+      const row = entry.db.prepare(`SELECT 1 FROM ${table} WHERE id = ? LIMIT 1`).get(id);
+      if (row) {
+        entry.lastUsed = Date.now();
+        return { workspacePath: entry.workspacePath, db: entry.db };
+      }
+    } catch {
+      /* table 不存在或其他错误，跳过 */
+    }
   }
+  return null;
 }
 
-function normalizeReasoningAliases(db: DB): void {
-  const aliases: Array<[string, string]> = [
-    ['xhigh', 'extra-high'],
-  ];
-  for (const [from, to] of aliases) {
-    db.prepare('UPDATE agents SET reasoning = ? WHERE reasoning = ?').run(to, from);
+/** 关闭全部 db 句柄（server shutdown 用） */
+export function closeAllDbs(): void {
+  for (const entry of pool.values()) {
+    try {
+      entry.db.close();
+    } catch {
+      /* ignore */
+    }
   }
+  pool.clear();
 }
 
-function ensureColumn(db: DB, table: string, column: string, definition: string): void {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-  if (!cols.some((c) => c.name === column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+function evictIfNeeded(): void {
+  if (pool.size <= POOL_MAX) return;
+  // 找 lastUsed 最早的 entry 淘汰
+  let oldest: PoolEntry | null = null;
+  for (const e of pool.values()) {
+    if (!oldest || e.lastUsed < oldest.lastUsed) oldest = e;
   }
+  if (oldest) closeProjectDb(oldest.workspacePath);
 }
 
-function dropColumnIfExists(db: DB, table: string, column: string): void {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-  if (cols.some((c) => c.name === column)) {
-    db.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+// 每分钟检查 idle，关闭超过 IDLE_CLOSE_MS 的 db
+setInterval(() => {
+  const now = Date.now();
+  for (const [path, entry] of pool.entries()) {
+    if (now - entry.lastUsed > IDLE_CLOSE_MS) {
+      try {
+        entry.db.close();
+      } catch {
+        /* ignore */
+      }
+      pool.delete(path);
+    }
   }
-}
+}, 60 * 1000).unref();
